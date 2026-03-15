@@ -1,5 +1,6 @@
 from auth import login
 from crud import *
+from crud import update_user_modules
 from streamlit_cookies_manager.encrypted_cookie_manager import EncryptedCookieManager
 import datetime
 import base64
@@ -451,6 +452,39 @@ if "username" not in st.session_state:
 if "role" not in st.session_state:
     st.session_state.role = cookies.get("role")
 
+if "allowed_modules" not in st.session_state:
+    st.session_state.allowed_modules = cookies.get("allowed_modules", "")
+
+# --- Live Permission Sync ---
+if st.session_state.get("logged_in") and st.session_state.get("user_id"):
+    current_user_info = get_user_by_id(st.session_state.user_id)
+    if current_user_info:
+        # Check if account was revoked
+        if current_user_info.get("is_active") is False:
+            # Force logout
+            cookies["logged_in"] = "0"
+            cookies["user_id"] = ""
+            cookies.save()
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.error("❌ Your permission has been revoked. You have been logged out.")
+            st.rerun()
+        
+        # Sync role and permissions
+        st.session_state.role = current_user_info["role"]
+        st.session_state.allowed_modules = current_user_info["allowed_modules"] or ""
+        
+        # Update cookies for persistence
+        cookies["role"] = st.session_state.role
+        cookies["allowed_modules"] = st.session_state.allowed_modules
+        cookies.save()
+    else:
+        # User no longer exists in DB
+        cookies["logged_in"] = "0"
+        cookies.save()
+        st.session_state.logged_in = False
+        st.rerun()
+
 
 # ================= LOGIN PAGE =================
 
@@ -486,11 +520,13 @@ if not st.session_state.logged_in or not st.session_state.user_id:
                         st.session_state.user_id = user["id"]
                         st.session_state.username = user["username"]
                         st.session_state.role = user["role"]
+                        st.session_state.allowed_modules = user["allowed_modules"] or ""
 
                         cookies["logged_in"] = "1"
                         cookies["user_id"] = str(user["id"])
                         cookies["username"] = user["username"]
                         cookies["role"] = user["role"]
+                        cookies["allowed_modules"] = user["allowed_modules"] or ""
                         cookies.save()
 
                         st.rerun()
@@ -631,20 +667,33 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
             st.rerun()
 
 
+# ================= MODULE CONFIGURATION =================
+
+all_tables = get_all_tables()
+
+# Extract module prefixes dynamically
+all_modules = {}
+for table in all_tables:
+    if "_" in table:
+        module_prefix = "_".join(table.split("_")[:2])
+        all_modules.setdefault(module_prefix, []).append(table)
+
+all_module_display_map = {m: m.replace("_", " ").title() for m in all_modules.keys()}
+
 # =====================================================
 # ================= USER SIDE =========================
 # =====================================================
 
 if not is_admin:
 
-    all_tables = get_all_tables()
-
-    # Extract module prefixes dynamically
-    modules = {}
-    for table in all_tables:
-        if "_" in table:
-            module_prefix = "_".join(table.split("_")[:2])
-            modules.setdefault(module_prefix, []).append(table)
+    # Filter modules based on permissions
+    allowed = st.session_state.get("allowed_modules", "")
+    if allowed:
+        allowed_list = allowed.split(",")
+        modules = {k: v for k, v in all_modules.items() if k in allowed_list}
+    else:
+        # If no modules assigned, show nothing in sidebar except dashboard
+        modules = {}
 
     module_display_map = {m: m.replace("_", " ").title() for m in modules.keys()}
     sidebar_options = ["📄 Dashboard"] + list(module_display_map.values())
@@ -708,6 +757,7 @@ if not is_admin:
     if selected_module == "📄 Dashboard":
 
         st.markdown(f"## 👋 Hello, {st.session_state.username}!")
+
         st.markdown("""
         Welcome to the **Audit Management System Portal**. This platform is designed to streamline your 
         application submission process, track the status of your submitted records, and manage your 
@@ -717,18 +767,22 @@ if not is_admin:
         
         # --- Start New Application Section ---
         st.markdown("### 🚀 Start New Application")
-        st.markdown("Select a module below to start a new application.")
         
-        # Display modules in a select box
-        mod_names = list(module_display_map.values())
-        c_sel, c_btn = st.columns([5, 1])
-        with c_sel:
-            selected_new_mod = st.selectbox("Select Module", mod_names, label_visibility="collapsed")
-        with c_btn:
-            if st.button("Start →", use_container_width=True, type="primary"):
-                if selected_new_mod:
-                    st.session_state.nav_to_module = selected_new_mod
-                    st.rerun()
+        if not modules:
+            st.warning("⚠️ **No modules have been assigned to your account yet.**\n\nPlease contact your administrator to grant access to specific modules.")
+        else:
+            st.markdown("Select a module below to start a new application.")
+            
+            # Display modules in a select box
+            mod_names = list(module_display_map.values())
+            c_sel, c_btn = st.columns([5, 1])
+            with c_sel:
+                selected_new_mod = st.selectbox("Select Module", mod_names, label_visibility="collapsed")
+            with c_btn:
+                if st.button("Start →", use_container_width=True, type="primary"):
+                    if selected_new_mod:
+                        st.session_state.nav_to_module = selected_new_mod
+                        st.rerun()
             
         st.markdown("---")
 
@@ -739,7 +793,12 @@ if not is_admin:
         st.markdown("Here you can view all the applications you have submitted and their current status.")
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-        submissions = get_user_master_submissions(user_id, module=None)
+        raw_submissions = get_user_master_submissions(user_id, module=None)
+        
+        # Filter submissions by current module permissions
+        allowed_list = st.session_state.get("allowed_modules", "").split(",") if st.session_state.get("allowed_modules") else []
+        submissions = [s for s in raw_submissions if s.get("module") in allowed_list]
+
         approved_count = sum(1 for s in submissions if s["status"] == "APPROVED")
         rejected_count = sum(1 for s in submissions if s["status"] == "REJECTED")
         pending_count  = sum(1 for s in submissions if s["status"] == "PENDING")
@@ -1331,13 +1390,21 @@ if is_admin:
             new_password = st.text_input("Password", type="password")
             new_role = st.selectbox("Role", options=["operator", "admin"], format_func=lambda x: "Administrator" if x == "admin" else "Operator")
             
+            # Module selection
+            selected_mods = st.multiselect(
+                "Allowed Modules",
+                options=list(all_modules.keys()),
+                format_func=lambda x: all_module_display_map.get(x, x)
+            )
+            
             submit_user = st.form_submit_button("Create User", type="primary")
             
             if submit_user:
                 if not new_username.strip() or not new_password.strip():
                     st.error("⚠️ Username and Password cannot be empty.")
                 else:
-                    success, msg = create_user(new_username.strip(), new_password.strip(), role=new_role)
+                    modules_str = ",".join(selected_mods)
+                    success, msg = create_user(new_username.strip(), new_password.strip(), role=new_role, allowed_modules=modules_str)
                     if success:
                         st.success(f"✅ {msg}")
                     else:
@@ -1349,20 +1416,28 @@ if is_admin:
         users_admin_df = get_all_users_admin()
         
         if not users_admin_df.empty:
-            c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+            c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 3.5, 1.5])
             c1.markdown("**Username**")
             c2.markdown("**Role**")
             c3.markdown("**Status**")
-            c4.markdown("**Action**")
+            c4.markdown("**Allowed Modules**")
+            c5.markdown("**Action**")
             st.markdown("<hr style='margin: 0; padding: 0;'>", unsafe_allow_html=True)
             
+            def update_user_per_callback(uid, session_key):
+                new_mods = st.session_state.get(session_key, [])
+                update_user_modules(uid, new_mods)
+                st.toast(f"Permissions updated for user ID: {uid}")
+
             for _, row_usr in users_admin_df.iterrows():
                 uid = row_usr['id']
                 uname = row_usr['username']
                 urole = row_usr['role']
                 is_active = row_usr.get('is_active', True)
+                allowed_str = row_usr.get('allowed_modules', '')
+                current_allowed = allowed_str.split(',') if allowed_str else []
                 
-                cc1, cc2, cc3, cc4 = st.columns([3, 2, 2, 2])
+                cc1, cc2, cc3, cc4, cc5 = st.columns([2, 1.5, 1.5, 3.5, 1.5])
                 with cc1:
                     st.markdown(f"<div style='padding-top:10px;'><b>{uname}</b></div>", unsafe_allow_html=True)
                 with cc2:
@@ -1373,14 +1448,28 @@ if is_admin:
                     else:
                         st.markdown("<div style='padding-top:10px;color:#ef4444;font-weight:600;'>❌ Revoked</div>", unsafe_allow_html=True)
                 with cc4:
-                    if st.session_state.user_id == uid:
-                        st.button("Current Admin", disabled=True, key=f"btn_{uid}")
-                    elif urole == 'admin':
-                        st.button("Admin Assigned", disabled=True, key=f"btn_admin_{uid}")
+                    if urole != 'admin':
+                        st.multiselect(
+                            "Modules",
+                            options=list(all_modules.keys()),
+                            default=[m for m in current_allowed if m in all_modules],
+                            format_func=lambda x: all_module_display_map.get(x, x),
+                            key=f"mods_inline_{uid}",
+                            label_visibility="collapsed",
+                            on_change=update_user_per_callback,
+                            args=(uid, f"mods_inline_{uid}")
+                        )
                     else:
-                        btn_label = "Revoke Access" if is_active else "Grant Access"
+                        st.markdown("<div style='padding-top:10px;color:#64748b;font-style:italic;'>Full Access</div>", unsafe_allow_html=True)
+                with cc5:
+                    if st.session_state.user_id == uid:
+                        st.button("Self", disabled=True, key=f"btn_{uid}", use_container_width=True)
+                    elif urole == 'admin':
+                        st.button("Admin", disabled=True, key=f"btn_admin_{uid}", use_container_width=True)
+                    else:
+                        btn_label = "Revoke" if is_active else "Grant"
                         btn_type = "secondary" if is_active else "primary"
-                        if st.button(btn_label, key=f"btn_toggle_{uid}", type=btn_type):
+                        if st.button(btn_label, key=f"btn_toggle_{uid}", type=btn_type, use_container_width=True):
                             toggle_user_status(uid, is_active)
                             st.rerun()
                 st.markdown("<hr style='margin: 0; padding: 0;'>", unsafe_allow_html=True)

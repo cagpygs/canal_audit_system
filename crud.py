@@ -1054,7 +1054,7 @@ def delete_draft_by_user(user_id, tables):
         if conn:
             release_connection(conn)
 
-def create_user(username, password, role="USER"):
+def create_user(username, password, role="USER", allowed_modules=""):
     """
     Creates a new user. Returns (True, "Success message") or (False, "Error message").
     """
@@ -1069,8 +1069,8 @@ def create_user(username, password, role="USER"):
 
         # Insert new user
         cur.execute(
-            "INSERT INTO users (username, password_hash, role, is_active) VALUES (%s, %s, %s, TRUE)",
-            (username, password, role)
+            "INSERT INTO users (username, password_hash, role, is_active, allowed_modules) VALUES (%s, %s, %s, TRUE, %s)",
+            (username, password, role, allowed_modules)
         )
         conn.commit()
         return True, f"User '{username}' created successfully!"
@@ -1086,12 +1086,41 @@ def get_all_users_admin():
     conn = None
     try:
         conn = get_connection()
-        df = pd.read_sql("SELECT id, username, role, is_active FROM users ORDER BY id", conn)
+        df = pd.read_sql("SELECT id, username, role, is_active, allowed_modules FROM users ORDER BY id", conn)
         return df
     except Exception as e:
         st.error(f"Error getting all users admin: {e}")
         return pd.DataFrame(columns=["id", "username", "role", "is_active"])
     finally:
+        if conn:
+            release_connection(conn)
+
+def get_user_by_id(uid):
+    """
+    Fetches user information by ID.
+    """
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, username, role, is_active, allowed_modules FROM users WHERE id = %s", (uid,))
+        row = cur.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "username": row[1],
+                "role": row[2],
+                "is_active": row[3],
+                "allowed_modules": row[4]
+            }
+        return None
+    except Exception as e:
+        st.error(f"Error fetching user by ID: {e}")
+        return None
+    finally:
+        if cur:
+            cur.close()
         if conn:
             release_connection(conn)
 
@@ -1106,6 +1135,28 @@ def toggle_user_status(user_id, current_status):
         conn.commit()
     except Exception as e:
         st.error(f"Error toggling user status: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+def update_user_modules(user_id, modules_list):
+    """
+    Updates the allowed_modules for a user. modules_list is a list of module prefixes.
+    """
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        modules_str = ",".join(modules_list)
+        cur.execute("UPDATE users SET allowed_modules = %s WHERE id = %s", (modules_str, user_id))
+        conn.commit()
+    except Exception as e:
+        st.error(f"Error updating user modules: {e}")
         if conn:
             conn.rollback()
     finally:

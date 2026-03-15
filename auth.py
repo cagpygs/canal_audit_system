@@ -17,7 +17,7 @@ def login(username, password):
 
         # First, check if user exists and password matches
         cur.execute("""
-            SELECT id, username, role, is_active
+            SELECT id, username, role, is_active, allowed_modules
             FROM users
             WHERE LOWER(username) = LOWER(%s)
             AND password_hash = %s
@@ -34,7 +34,8 @@ def login(username, password):
             return {
                 "id": row[0],
                 "username": row[1],
-                "role": row[2]
+                "role": row[2],
+                "allowed_modules": row[4]
             }, None
 
         return None, "Invalid username or password"
