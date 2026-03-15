@@ -1495,153 +1495,175 @@ if is_admin:
 
     with tab_review:
         # ---- User Selector ----
-        users_df = get_users_with_data()
+        all_users_df = get_all_users_admin()
+        # Filter for non-admins (applicants)
+        users_df = all_users_df[all_users_df["role"] != "admin"]
 
         if users_df.empty:
             st.markdown("""
             <div class="empty-state">
-                <div class="empty-icon">📭</div>
-                <p>No applications submitted yet.</p>
-                <small>Applications will appear here once users submit them.</small>
+                <div class="empty-icon">👥</div>
+                <p>No applicant accounts found.</p>
+                <small>Create a user account first in the 'Create User' tab.</small>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown("#### 👤 Select an Applicant to Review")
+            applicant_options = ["--- Select Applicant ---"] + list(users_df["username"])
             selected_user = st.selectbox(
                 "Applicant",
-                users_df["username"],
+                applicant_options,
                 label_visibility="collapsed",
                 help="Choose the user whose applications you want to review"
             )
-            user_row = users_df[users_df["username"] == selected_user].iloc[0]
-            selected_user_id = int(user_row["id"])
 
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            if selected_user != "--- Select Applicant ---":
+                user_row = users_df[users_df["username"] == selected_user].iloc[0]
+                selected_user_id = int(user_row["id"])
 
-            # ---- Status Counts ----
-            approved, rejected, pending = get_user_master_status_counts(selected_user_id)
-            total = approved + rejected + pending
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-            st.markdown("#### 📊 Submission Overview")
-            render_metric_cards(total, approved, pending, rejected, st.session_state.status_filter, card_type="admin")
+                # ---- Status Counts ----
+                approved, rejected, pending = get_user_master_status_counts(selected_user_id)
+                total = approved + rejected + pending
 
-            st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+                st.markdown("#### 📊 Submission Overview")
+                
+                if total == 0:
+                    st.markdown(f"""
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <p>No submissions found for <b>{selected_user}</b>.</p>
+                        <small>This user has not submitted any applications for review yet.</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    render_metric_cards(total, approved, pending, rejected, st.session_state.status_filter, card_type="admin")
 
-            # ---- Submission List ----
-            submissions = get_user_master_submissions_admin(selected_user_id)
+                st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-            if submissions and st.session_state.status_filter != "ALL":
-                st.markdown("#### 📋 Submissions")
+                # ---- Submission List ----
+                submissions = get_user_master_submissions_admin(selected_user_id)
 
-                for sub in submissions:
+                if submissions and st.session_state.status_filter != "ALL":
+                    st.markdown("#### 📋 Submissions")
 
-                    if st.session_state.status_filter != "ALL":
-                        if sub["status"] != st.session_state.status_filter:
-                            continue
+                    for sub in submissions:
 
-                    module_name = sub.get("module")
-                    module_label = (module_name or "Unknown").replace("_", " ").title()
-                    status = sub["status"]
+                        if st.session_state.status_filter != "ALL":
+                            if sub["status"] != st.session_state.status_filter:
+                                continue
 
-                    if status == "APPROVED":
-                        badge_html = '<span class="badge badge-approved">✅ Approved</span>'
-                    elif status == "REJECTED":
-                        badge_html = '<span class="badge badge-rejected">❌ Rejected</span>'
-                    else:
-                        badge_html = '<span class="badge badge-pending">🕐 Pending Review</span>'
+                        module_name = sub.get("module")
+                        module_label = (module_name or "Unknown").replace("_", " ").title()
+                        status = sub["status"]
 
-                    # ---- Timeline Card ----
-                    created_at  = sub.get("created_at", "")
-                    approved_at = sub.get("approved_at", "")
-                    rejected_at = sub.get("rejected_at", "")
-                    reason      = sub.get("rejection_reason", "")
+                        if status == "APPROVED":
+                            badge_html = '<span class="badge badge-approved">✅ Approved</span>'
+                        elif status == "REJECTED":
+                            badge_html = '<span class="badge badge-rejected">❌ Rejected</span>'
+                        else:
+                            badge_html = '<span class="badge badge-pending">🕐 Pending Review</span>'
 
-                    # Build extra rows without any leading whitespace (prevents Markdown code-block treatment)
-                    if status == "APPROVED" and approved_at:
-                        extra_rows = f'<div class="timeline-row"><div class="timeline-dot" style="background:#10b981"></div><span><b>Approved:</b> {fmt_dt(approved_at)}</span></div>'
-                    elif status == "REJECTED":
-                        extra_rows = ""
-                        if rejected_at:
-                            extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#ef4444"></div><span><b>Rejected:</b> {fmt_dt(rejected_at)}</span></div>'
-                        if reason:
-                            extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#f97316"></div><span><b>Reason:</b> {reason}</span></div>'
-                    else:
-                        extra_rows = '<div class="timeline-row"><div class="timeline-dot" style="background:#f59e0b"></div><span><b>Status:</b> Awaiting review</span></div>'
+                        # ---- Timeline Card ----
+                        created_at  = sub.get("created_at", "")
+                        approved_at = sub.get("approved_at", "")
+                        rejected_at = sub.get("rejected_at", "")
+                        reason      = sub.get("rejection_reason", "")
 
-                    submitted_str = fmt_dt(created_at)
+                        # Build extra rows without any leading whitespace (prevents Markdown code-block treatment)
+                        if status == "APPROVED" and approved_at:
+                            extra_rows = f'<div class="timeline-row"><div class="timeline-dot" style="background:#10b981"></div><span><b>Approved:</b> {fmt_dt(approved_at)}</span></div>'
+                        elif status == "REJECTED":
+                            extra_rows = ""
+                            if rejected_at:
+                                extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#ef4444"></div><span><b>Rejected:</b> {fmt_dt(rejected_at)}</span></div>'
+                            if reason:
+                                extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#f97316"></div><span><b>Reason:</b> {reason}</span></div>'
+                        else:
+                            extra_rows = '<div class="timeline-row"><div class="timeline-dot" style="background:#f59e0b"></div><span><b>Status:</b> Awaiting review</span></div>'
 
-                    timeline_html = (
-                        f'<div class="timeline-card">'
-                        f'<div style="font-weight:700;margin-bottom:10px;font-size:14px;color:#1e3a5f;">'
-                        f'🕒 Submission Timeline &mdash; {module_label}&nbsp;&nbsp;{badge_html}'
-                        f'</div>'
-                        f'<div class="timeline-row">'
-                        f'<div class="timeline-dot" style="background:#3b82f6"></div>'
-                        f'<span><b>Submitted:</b> {submitted_str}</span>'
-                        f'</div>'
-                        f'{extra_rows}'
-                        f'</div>'
-                    )
-                    st.markdown(timeline_html, unsafe_allow_html=True)
+                        submitted_str = fmt_dt(created_at)
 
-                    # ---- Submission Detail ----
-                    with st.expander(f"📄 View Form Details — {module_label}", expanded=False):
+                        timeline_html = (
+                            f'<div class="timeline-card">'
+                            f'<div style="font-weight:700;margin-bottom:10px;font-size:14px;color:#1e3a5f;">'
+                            f'🕒 Submission Timeline &mdash; {module_label}&nbsp;&nbsp;{badge_html}'
+                            f'</div>'
+                            f'<div class="timeline-row">'
+                            f'<div class="timeline-dot" style="background:#3b82f6"></div>'
+                            f'<span><b>Submitted:</b> {submitted_str}</span>'
+                            f'</div>'
+                            f'{extra_rows}'
+                            f'</div>'
+                        )
+                        st.markdown(timeline_html, unsafe_allow_html=True)
 
-                        full_data = get_full_submission_data(sub["id"])
+                        # ---- Submission Detail ----
+                        with st.expander(f"📄 View Form Details — {module_label}", expanded=False):
 
-                        for section_name, df_section in full_data.items():
-                            clean_name = (
-                                section_name.replace(module_name + "_", "")
-                                .replace("_", " ")
-                                .title()
-                            )
-                            st.markdown(f"**📄 {clean_name}**")
-                            st.dataframe(df_section, use_container_width=True)
+                            full_data = get_full_submission_data(sub["id"])
 
-                        st.markdown("---")
-                        st.markdown("### ⚖️ Review Decision")
+                            for section_name, df_section in full_data.items():
+                                clean_name = (
+                                    section_name.replace(module_name + "_", "")
+                                    .replace("_", " ")
+                                    .title()
+                                )
+                                st.markdown(f"**📄 {clean_name}**")
+                                st.dataframe(df_section, use_container_width=True)
 
-                        col_approve, col_reject, col_download = st.columns([1, 2, 1])
+                            st.markdown("---")
+                            st.markdown("### ⚖️ Review Decision")
 
-                        with col_approve:
-                            st.markdown('<div class="approve-btn">', unsafe_allow_html=True)
-                            if st.button("✅ Approve", key=f"a{sub['id']}", use_container_width=True):
-                                approve_master_submission(sub["id"])
-                                st.success("Application approved successfully.")
-                                st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
+                            col_approve, col_reject, col_download = st.columns([1, 2, 1])
 
-                        with col_reject:
-                            reason_input = st.text_input(
-                                "Rejection Reason (required before rejecting)",
-                                key=f"r{sub['id']}",
-                                placeholder="Explain why this application is being rejected..."
-                            )
-                            st.markdown('<div class="reject-btn">', unsafe_allow_html=True)
-                            if st.button("❌ Reject", key=f"rej{sub['id']}", use_container_width=True):
-                                if not reason_input.strip():
-                                    st.error("⚠️ Please enter a rejection reason before rejecting.")
-                                else:
-                                    reject_master_submission(sub["id"], reason_input)
-                                    st.success("Application rejected.")
+                            with col_approve:
+                                st.markdown('<div class="approve-btn">', unsafe_allow_html=True)
+                                if st.button("✅ Approve", key=f"a{sub['id']}", use_container_width=True):
+                                    approve_master_submission(sub["id"])
+                                    st.success("Application approved successfully.")
                                     st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
+                                st.markdown('</div>', unsafe_allow_html=True)
 
-                        with col_download:
-                            pdf = export_master_submission_pdf(sub["id"])
-                            st.download_button(
-                                "📥 Download PDF",
-                                pdf,
-                                file_name=f"{selected_user}_cycle_{sub['cycle']}.pdf",
-                                mime="application/pdf",
-                                key=f"pdf_{sub['id']}",
-                                use_container_width=True,
-                            )
+                            with col_reject:
+                                reason_input = st.text_input(
+                                    "Rejection Reason (required before rejecting)",
+                                    key=f"r{sub['id']}",
+                                    placeholder="Explain why this application is being rejected..."
+                                )
+                                st.markdown('<div class="reject-btn">', unsafe_allow_html=True)
+                                if st.button("❌ Reject", key=f"rej{sub['id']}", use_container_width=True):
+                                    if not reason_input.strip():
+                                        st.error("⚠️ Please enter a rejection reason before rejecting.")
+                                    else:
+                                        reject_master_submission(sub["id"], reason_input)
+                                        st.success("Application rejected.")
+                                        st.rerun()
+                                st.markdown('</div>', unsafe_allow_html=True)
 
-            else:
-                st.markdown("""
-                <div class="empty-state">
-                    <div class="empty-icon">🔍</div>
-                    <small>Try selecting a different filter or applicant.</small>
-                </div>
-                """, unsafe_allow_html=True)
+                            with col_download:
+                                pdf = export_master_submission_pdf(sub["id"])
+                                st.download_button(
+                                    "📥 Download PDF",
+                                    pdf,
+                                    file_name=f"{selected_user}_cycle_{sub['cycle']}.pdf",
+                                    mime="application/pdf",
+                                    key=f"pdf_{sub['id']}",
+                                    use_container_width=True,
+                                )
+
+                elif st.session_state.status_filter != "ALL":
+                    st.markdown("""
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <small>Try selecting a different filter or applicant.</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else: # This else corresponds to `if submissions and st.session_state.status_filter != "ALL":`
+                    st.markdown("""
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <small>No submissions found for the selected filter.</small>
+                    </div>
+                    """, unsafe_allow_html=True)
