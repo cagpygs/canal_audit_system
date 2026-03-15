@@ -1530,7 +1530,7 @@ if is_admin:
             # ---- Submission List ----
             submissions = get_user_master_submissions_admin(selected_user_id)
 
-            if submissions:
+            if submissions and st.session_state.status_filter != "ALL":
                 st.markdown("#### 📋 Submissions")
 
                 for sub in submissions:
@@ -1642,7 +1642,6 @@ if is_admin:
                 st.markdown("""
                 <div class="empty-state">
                     <div class="empty-icon">🔍</div>
-                    <p>No submissions found for this user.</p>
                     <small>Try selecting a different filter or applicant.</small>
                 </div>
                 """, unsafe_allow_html=True)
