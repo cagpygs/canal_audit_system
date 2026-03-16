@@ -166,9 +166,11 @@ def save_draft_record(table, data, user_id):
                 sql.SQL("{} = %s").format(sql.Identifier(col)) for col in safe_cols
             )
 
+            # Update latest draft - ensure created_at is set if missing
             update_query = sql.SQL("""
                 UPDATE {table}
-                SET {fields}
+                SET {fields},
+                    created_at = COALESCE(created_at, NOW())
                 WHERE id=%s
             """).format(table=sql.Identifier(table), fields=set_clause)
 
@@ -177,8 +179,8 @@ def save_draft_record(table, data, user_id):
         else:
             # Insert new draft
             insert_query = sql.SQL("""
-                INSERT INTO {table} ({fields}, created_by, is_draft)
-                VALUES ({placeholders}, %s, TRUE)
+                INSERT INTO {table} ({fields}, created_by, is_draft, created_at)
+                VALUES ({placeholders}, %s, TRUE, NOW())
             """).format(
                 table=sql.Identifier(table),
                 fields=sql.SQL(", ").join(map(sql.Identifier, safe_cols)),
@@ -210,11 +212,10 @@ def create_master_submission(user_id, module, tables):
         conn = get_connection()
         cur = conn.cursor()
 
-        # Create module-specific master
         cur.execute(
             """
-            INSERT INTO master_submission (user_id, cycle, status, module)
-            VALUES (%s, %s, 'PENDING', %s)
+            INSERT INTO master_submission (user_id, cycle, status, module, created_at)
+            VALUES (%s, %s, 'PENDING', %s, NOW())
             RETURNING id
         """,
             (user_id, cycle, module),
@@ -340,6 +341,38 @@ def get_full_submission_data(master_id):
 
     except Exception as e:
         st.error(f"Error getting full submission data: {e}")
+    finally:
+        if conn:
+            release_connection(conn)
+    return full_data
+
+
+# ================= GET FULL DRAFT DATA =================
+def get_full_draft_data(user_id, module_tables):
+    """
+    Fetches all records with is_draft=TRUE for a specific user across a set of tables.
+    Returns a dict of {table_name: DataFrame}
+    """
+    conn = None
+    full_data = {}
+    try:
+        conn = get_connection()
+        for table in module_tables:
+            df = pd.read_sql(
+                f"""
+                SELECT *
+                FROM "{table}"
+                WHERE created_by=%s AND is_draft=TRUE
+            """,
+                conn,
+                params=[user_id],
+            )
+
+            if not df.empty:
+                full_data[table] = df
+
+    except Exception as e:
+        st.error(f"Error getting full draft data: {e}")
     finally:
         if conn:
             release_connection(conn)
@@ -521,12 +554,71 @@ def get_incomplete_forms(user_id, tables):
     return incomplete
 
 
+# ================= GET DRAFT SUMMARIES =================
+def get_user_draft_summaries(user_id, all_modules):
+    """
+    Scans all modules to see if a user has any records with is_draft=TRUE.
+    Returns a list of synthetic 'submission' dicts with status='DRAFT'.
+    """
+    user_id = int(user_id)
+    conn = None
+    cur = None
+    draft_summaries = []
+
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        for module_prefix, tables in all_modules.items():
+            if not tables:
+                continue
+            
+            # Use UNION ALL to check if any table in this module has a draft
+            checks = []
+            params = []
+            for table in tables:
+                checks.append(f"""
+                    SELECT created_at as dt
+                    FROM "{table}" 
+                    WHERE created_by=%s AND is_draft=TRUE
+                """)
+                params.append(user_id)
+            
+            combined = " UNION ALL ".join(checks) + " ORDER BY 1 DESC NULLS LAST LIMIT 1"
+            
+            cur.execute(combined, params)
+            row = cur.fetchone()
+            
+            if row:
+                draft_summaries.append({
+                    "id": f"draft_{module_prefix}",
+                    "user_id": user_id,
+                    "cycle": "N/A",
+                    "status": "DRAFT",
+                    "module": module_prefix,
+                    "created_at": row[0],
+                    "approved_at": None,
+                    "rejection_reason": None,
+                    "created_by_user": None # Will be filled by caller if needed
+                })
+
+    except Exception as e:
+        st.error(f"Error getting draft summaries: {e}")
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+    return draft_summaries
+
+
 # ================= STATUS COUNTS =================
-def get_user_master_status_counts(user_id):
+def get_user_master_status_counts(user_id, all_modules=None):
     user_id = int(user_id)
 
     conn = None
-    approved = rejected = pending = 0
+    approved = rejected = pending = drafts = 0
 
     try:
         conn = get_connection()
@@ -549,6 +641,11 @@ def get_user_master_status_counts(user_id):
                 rejected = row["count"]
             else:
                 pending = row["count"]
+        
+        # If all_modules provided, count modules with drafts
+        if all_modules:
+            draft_list = get_user_draft_summaries(user_id, all_modules)
+            drafts = len(draft_list)
 
     except Exception as e:
         st.error(f"Error getting master status counts: {e}")
@@ -556,6 +653,8 @@ def get_user_master_status_counts(user_id):
         if conn:
             release_connection(conn)
 
+    if all_modules:
+        return approved, rejected, pending, drafts
     return approved, rejected, pending
 
 

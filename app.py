@@ -650,6 +650,7 @@ def show_submission_details(sub, mode="user"):
     module_key = sub.get("module") or ""
     module_label = module_key.replace("_", " ").title()
     status = sub["status"]
+    is_synthetic_draft = str(sub.get("id", "")).startswith("draft_")
     
     # ---- Status Summary Timeline ----
     created_at = sub.get("created_at", "")
@@ -665,6 +666,9 @@ def show_submission_details(sub, mode="user"):
     elif status == "REJECTED":
         status_color = "#ef4444"
         status_text = f"Rejected on {fmt_dt(rejected_at)}"
+    elif status == "DRAFT":
+        status_color = "#64748b"
+        status_text = "Work In Progress (Draft)"
 
     created_by_user = sub.get("created_by_user") or "Unknown"
     
@@ -673,8 +677,8 @@ def show_submission_details(sub, mode="user"):
         <div style="display:flex; justify-content:space-between; align-items:start;">
             <div>
                 <div style="font-weight:700; font-size:14px; color:#1e3a5f; margin-bottom:4px;">{module_label}</div>
-                <div style="font-size:12px; color:#64748b; margin-bottom:2px;"><b>Submitted By:</b> {created_by_user}</div>
-                <div style="font-size:12px; color:#64748b;"><b>Submitted on:</b> {fmt_dt(created_at)}</div>
+                <div style="font-size:12px; color:#64748b; margin-bottom:2px;"><b>{"Submitted By" if status != "DRAFT" else "Created By"}:</b> {created_by_user}</div>
+                <div style="font-size:12px; color:#64748b;"><b>{"Submitted on" if status != "DRAFT" else "Last Updated"}:</b> {fmt_dt(created_at)}</div>
             </div>
             <div style="text-align:right;">
                 <div style="font-size:13px; color:{status_color}; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">{status_text}</div>
@@ -684,7 +688,16 @@ def show_submission_details(sub, mode="user"):
     """, unsafe_allow_html=True)
 
     # ---- Data Sections ----
-    full_data = get_full_submission_data(sub["id"])
+    if is_synthetic_draft:
+        # For drafts, we need to fetch by user and module prefix
+        user_id = sub.get("user_id")
+        module_tables = all_modules.get(module_key, [])
+        full_data = get_full_draft_data(user_id, module_tables)
+    else:
+        full_data = get_full_submission_data(sub["id"])
+    
+    if not full_data:
+        st.info("No data entries found yet for this draft.")
     
     for section_name, df_section in full_data.items():
         clean_name = (
@@ -699,6 +712,10 @@ def show_submission_details(sub, mode="user"):
     st.markdown("---")
 
     # ---- Actions based on mode ----
+    if is_synthetic_draft:
+        st.info("💡 This is a **Draft** module. It has not been submitted yet and cannot be reviewed.")
+        return
+
     if mode == "user":
         if status == "REJECTED":
             if reason:
@@ -864,13 +881,13 @@ def render_pagination_footer(key_prefix, total_pages):
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
 
-def render_metric_cards(total, approved, pending, rejected, current_filter, card_type="user"):
-    """Render 4 status metric cards as clickable buttons with styled overlaid HTML."""
+def render_metric_cards(total, approved, pending, rejected, current_filter, card_type="user", drafts=None):
+    """Render status metric cards as clickable buttons."""
     prefix = f"{card_type}_"
+    num_cols = 5 if drafts is not None else 4
+    cols = st.columns(num_cols)
 
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
+    with cols[0]:
         st.markdown(f"""
         <div class="metric-card" style="background: white; border: 1px solid #e2e8f0; {'border: 2px solid #3b82f6;' if current_filter == 'ALL' else ''}">
             <div class="metric-number" style="color: #475569;">{total}</div>
@@ -885,7 +902,7 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
                 st.session_state.admin_review_page = 1
             st.rerun()
 
-    with c2:
+    with cols[1]:
         st.markdown(f"""
         <div class="metric-card approved {'active' if current_filter == 'APPROVED' else ''}">
             <div class="metric-number">{approved}</div>
@@ -900,7 +917,7 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
                 st.session_state.admin_review_page = 1
             st.rerun()
 
-    with c3:
+    with cols[2]:
         st.markdown(f"""
         <div class="metric-card pending {'active' if current_filter == 'PENDING' else ''}">
             <div class="metric-number">{pending}</div>
@@ -915,7 +932,7 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
                 st.session_state.admin_review_page = 1
             st.rerun()
 
-    with c4:
+    with cols[3]:
         st.markdown(f"""
         <div class="metric-card rejected {'active' if current_filter == 'REJECTED' else ''}">
             <div class="metric-number">{rejected}</div>
@@ -929,6 +946,18 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
                 st.session_state.status_filter = "REJECTED"
                 st.session_state.admin_review_page = 1
             st.rerun()
+
+    if drafts is not None:
+        with cols[4]:
+            st.markdown(f"""
+            <div class="metric-card" style="background: white; border: 1px solid #e2e8f0; {'border: 2px solid #3b82f6;' if current_filter == 'DRAFT' else ''}">
+                <div class="metric-number" style="color: #64748b;">{drafts}</div>
+                <div class="metric-label">📝 Drafts</div>
+            </div>""", unsafe_allow_html=True)
+            if st.button("Select Drafts", key=f"{prefix}btn_drafts", use_container_width=True):
+                st.session_state.status_filter = "DRAFT"
+                st.session_state.admin_review_page = 1
+                st.rerun()
 
 
 # ================= MODULE CONFIGURATION =================
@@ -1723,8 +1752,8 @@ if is_admin:
                 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
                 # ---- Status Counts ----
-                approved, rejected, pending = get_user_master_status_counts(selected_user_id)
-                total = approved + rejected + pending
+                approved, rejected, pending, drafts = get_user_master_status_counts(selected_user_id, all_modules)
+                total = approved + rejected + pending + drafts
 
                 st.markdown("#### 📊 Submission Overview")
                 
@@ -1732,17 +1761,24 @@ if is_admin:
                     st.markdown(f"""
                     <div class="empty-state">
                         <div class="empty-icon">🔍</div>
-                        <p>No submissions found for <b>{selected_user}</b>.</p>
-                        <small>This user has not submitted any applications for review yet.</small>
+                        <p>No activity found for <b>{selected_user}</b>.</p>
+                        <small>This user has no submissions or drafts currently.</small>
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    render_metric_cards(total, approved, pending, rejected, st.session_state.status_filter, card_type="admin")
+                    render_metric_cards(total, approved, pending, rejected, st.session_state.status_filter, card_type="admin", drafts=drafts)
 
                 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
                 # ---- Submission List ----
-                submissions = get_user_master_submissions_admin(selected_user_id)
+                masters = get_user_master_submissions_admin(selected_user_id)
+                draft_summaries = get_user_draft_summaries(selected_user_id, all_modules)
+                
+                # Attach creator name to drafts
+                for d in draft_summaries:
+                    d["created_by_user"] = selected_user
+
+                submissions = masters + draft_summaries
 
                 if submissions:
                     if st.session_state.status_filter != "ALL":
@@ -1751,9 +1787,9 @@ if is_admin:
                         filtered_subs = submissions
                     
                     if not filtered_subs:
-                        st.info(f"No {st.session_state.status_filter.lower()} applications found." if st.session_state.status_filter != "ALL" else "No applications found.")
+                        st.info(f"No {st.session_state.status_filter.lower()} items found." if st.session_state.status_filter != "ALL" else "No items found.")
                     else:
-                        st.markdown("#### 📋 Submissions")
+                        st.markdown("#### 📋 Activity List")
                         paged_subs, start_idx, total_pages = paginate_list(filtered_subs, "admin_review_page", render_controls=False)
 
                         # Tabular Header
@@ -1775,6 +1811,8 @@ if is_admin:
                                 badge_html = '<span class="badge badge-approved" style="padding:2px 8px; font-size:11px;">✅ Approved</span>'
                             elif status == "REJECTED":
                                 badge_html = '<span class="badge badge-rejected" style="padding:2px 8px; font-size:11px;">❌ Rejected</span>'
+                            elif status == "DRAFT":
+                                badge_html = '<span class="badge" style="padding:2px 8px; font-size:11px; background:#f1f5f9; color:#64748b; border:1px solid #e2e8f0;">📝 Draft</span>'
                             else:
                                 badge_html = '<span class="badge badge-pending" style="padding:2px 8px; font-size:11px;">🕐 Pending</span>'
 
@@ -1805,7 +1843,8 @@ if is_admin:
                             r4.markdown(badge_html, unsafe_allow_html=True)
                             
                             with r5:
-                                if st.button("🔍 Review", key=f"btn_rev_{sub['id']}", use_container_width=True):
+                                btn_label = "🔍 View" if status == "DRAFT" else "🔍 Review"
+                                if st.button(btn_label, key=f"btn_rev_{sub['id']}", use_container_width=True):
                                     show_submission_details(sub, mode="admin")
                         
                         # Navigation at bottom
