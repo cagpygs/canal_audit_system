@@ -455,6 +455,9 @@ if "role" not in st.session_state:
 if "allowed_modules" not in st.session_state:
     st.session_state.allowed_modules = cookies.get("allowed_modules", "")
 
+if "logging_out" not in st.session_state:
+    st.session_state.logging_out = False
+
 # --- Live Permission Sync ---
 if st.session_state.get("logged_in") and st.session_state.get("user_id"):
     try:
@@ -552,6 +555,8 @@ if not st.session_state.logged_in or not st.session_state.user_id:
                             st.error("❌ Incorrect username or password. Please try again.")
 
             st.markdown("</div>", unsafe_allow_html=True)
+            # Reset logout flag once login page is safely shown
+            st.session_state.logging_out = False
 
     st.markdown("""
     <div style="text-align:center; margin-top:28px; color:#94a3b8; font-size:13px;">
@@ -602,7 +607,8 @@ with col_logout:
         cookies["allowed_modules"] = ""
         cookies.save()
 
-        # Targetted reset instead of nuking everything
+        # Targeted reset instead of clear() which breaks CookieManager internals
+        st.session_state.logging_out = True
         st.session_state.logged_in = False
         st.session_state.user_id = None
         st.session_state.username = None
@@ -635,16 +641,249 @@ def fmt_dt(value):
     return str(value)[:16]
 
 
+@st.dialog("📋 Submission Details", width="large")
+def show_submission_details(sub, mode="user"):
+    """
+    Shows full submission data in a centered modal.
+    mode: "user" (Dashboard) or "admin" (Review Panel)
+    """
+    module_key = sub.get("module") or ""
+    module_label = module_key.replace("_", " ").title()
+    status = sub["status"]
+    
+    # ---- Status Summary Timeline ----
+    created_at = sub.get("created_at", "")
+    approved_at = sub.get("approved_at", "")
+    rejected_at = sub.get("rejected_at", "")
+    reason = sub.get("rejection_reason", "")
+
+    status_color = "#3b82f6" 
+    status_text = "Awaiting Review"
+    if status == "APPROVED":
+        status_color = "#10b981"
+        status_text = f"Approved on {fmt_dt(approved_at)}"
+    elif status == "REJECTED":
+        status_color = "#ef4444"
+        status_text = f"Rejected on {fmt_dt(rejected_at)}"
+
+    created_by_user = sub.get("created_by_user") or "Unknown"
+    
+    st.markdown(f"""
+    <div style="padding:15px; border-radius:12px; background:#f8fafc; margin-bottom:20px; border-left:5px solid {status_color};">
+        <div style="display:flex; justify-content:space-between; align-items:start;">
+            <div>
+                <div style="font-weight:700; font-size:14px; color:#1e3a5f; margin-bottom:4px;">{module_label}</div>
+                <div style="font-size:12px; color:#64748b; margin-bottom:2px;"><b>Submitted By:</b> {created_by_user}</div>
+                <div style="font-size:12px; color:#64748b;"><b>Submitted on:</b> {fmt_dt(created_at)}</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:13px; color:{status_color}; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">{status_text}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ---- Data Sections ----
+    full_data = get_full_submission_data(sub["id"])
+    
+    for section_name, df_section in full_data.items():
+        clean_name = (
+            section_name.replace(module_key + "_", "")
+            .replace("_", " ")
+            .title()
+        )
+        st.markdown(f"#### 📄 {clean_name}")
+        st.dataframe(df_section, use_container_width=True)
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ---- Actions based on mode ----
+    if mode == "user":
+        if status == "REJECTED":
+            if reason:
+                st.error(f"**Rejection Reason:** {reason}")
+            
+            sub_module_display = module_display_map.get(module_key, "")
+            if sub_module_display:
+                confirm_key = f"confirm_resubmit_{sub['id']}"
+                module_tables = sorted(modules.get(module_key, []))
+                has_draft = False
+                if module_tables:
+                    has_draft = get_user_draft(module_tables[0], st.session_state.user_id) is not None
+
+                if not st.session_state.get(confirm_key):
+                    if st.button("✏️ Edit & Resubmit", key=f"dlg_resub_{sub['id']}", use_container_width=True, type="primary"):
+                        if has_draft:
+                            st.session_state[confirm_key] = True
+                            st.rerun()
+                        else:
+                            st.session_state.resubmit_master_id = sub["id"]
+                            st.session_state.resubmit_module = module_key
+                            st.session_state.nav_to_module = sub_module_display
+                            for k in list(st.session_state.keys()):
+                                if k.endswith("_initialized"): del st.session_state[k]
+                            st.rerun()
+                else:
+                    st.warning("⚠️ **Active draft found.** Proceed items will erase current draft.")
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        if st.button("📝 Keep Draft", key=f"dlg_keep_{sub['id']}", use_container_width=True):
+                            st.session_state[confirm_key] = False
+                            st.session_state.nav_to_module = sub_module_display
+                            st.rerun()
+                    with c2:
+                        if st.button("🗑️ Discard & Edit", key=f"dlg_disc_{sub['id']}", use_container_width=True, type="primary"):
+                            delete_draft_by_user(int(st.session_state.user_id), module_tables)
+                            st.session_state[confirm_key] = False
+                            st.session_state.resubmit_master_id = sub["id"]
+                            st.session_state.resubmit_module = module_key
+                            st.session_state.nav_to_module = sub_module_display
+                            for k in list(st.session_state.keys()):
+                                if k.endswith("_initialized"): del st.session_state[k]
+                            st.rerun()
+                    with c3:
+                        if st.button("✖ Cancel", key=f"dlg_can_{sub['id']}", use_container_width=True):
+                            st.session_state[confirm_key] = False
+                            st.rerun()
+        
+        # Add PDF download for users if Approved or Rejected
+        if status in ["APPROVED", "REJECTED"]:
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+            pdf = export_master_submission_pdf(sub["id"])
+            st.download_button(
+                "📥 Download PDF Record",
+                pdf,
+                file_name=f"submission_{sub['id']}.pdf",
+                mime="application/pdf",
+                key=f"dlg_user_pdf_{sub['id']}",
+                use_container_width=True,
+                type="primary" if status == "APPROVED" else "secondary"
+            )
+
+    elif mode == "admin":
+        st.markdown("### ⚖️ Review Decision")
+        col_approve, col_reject, col_download = st.columns([1, 2, 1])
+
+        with col_approve:
+            if st.button("✅ Approve", key=f"dlg_app_{sub['id']}", use_container_width=True):
+                approve_master_submission(sub["id"])
+                st.success("Approved.")
+                st.rerun()
+
+        with col_reject:
+            reason_input = st.text_input("Rejection Reason", key=f"dlg_reason_{sub['id']}", placeholder="Reason...")
+            if st.button("❌ Reject", key=f"dlg_rej_{sub['id']}", use_container_width=True):
+                if not reason_input.strip():
+                    st.error("Enter reason.")
+                else:
+                    reject_master_submission(sub["id"], reason_input)
+                    st.success("Rejected.")
+                    st.rerun()
+
+        with col_download:
+            pdf = export_master_submission_pdf(sub["id"])
+            st.download_button(
+                "📥 PDF",
+                pdf,
+                file_name=f"submission_{sub['id']}.pdf",
+                mime="application/pdf",
+                key=f"dlg_pdf_{sub['id']}",
+                use_container_width=True,
+            )
+
 def is_section_complete(user_id, table):
     percentage, completed, total = get_user_progress(user_id, [table])
     return percentage == 100
 
+def paginate_list(items, key_prefix, render_controls=True):
+    """
+    Slices a list based on current session state page and renders pagination controls.
+    Includes a selector for items per page.
+    Returns (paged_items, start_idx, total_pages)
+    """
+    size_key = f"{key_prefix}_size"
+    if size_key not in st.session_state:
+        st.session_state[size_key] = 10
+    
+    if key_prefix not in st.session_state:
+        st.session_state[key_prefix] = 1
+
+    # Row count selector (Always at top)
+    col_size, _ = st.columns([2, 5])
+    with col_size:
+        new_size = st.selectbox(
+            "Rows per page:", 
+            [10, 25, 50, 100], 
+            index=[10, 25, 50, 100].index(st.session_state[size_key]),
+            key=f"size_select_{key_prefix}"
+        )
+        if new_size != st.session_state[size_key]:
+            st.session_state[size_key] = new_size
+            st.session_state[key_prefix] = 1 # Reset to page 1 on size change
+            st.rerun()
+
+    items_per_page = st.session_state[size_key]
+    total_pages = max(1, (len(items) + items_per_page - 1) // items_per_page)
+    
+    # Boundary check
+    if st.session_state[key_prefix] > total_pages:
+        st.session_state[key_prefix] = total_pages
+    if st.session_state[key_prefix] < 1:
+        st.session_state[key_prefix] = 1
+        
+    start_idx = (st.session_state[key_prefix] - 1) * items_per_page
+    end_idx = start_idx + items_per_page
+    
+    # Slice items
+    paged_items = items[start_idx:end_idx]
+    
+    # Render controls if requested and more than 1 page
+    if render_controls and total_pages > 1:
+        render_pagination_footer(key_prefix, total_pages)
+        
+    return paged_items, start_idx, total_pages
+
+def render_pagination_footer(key_prefix, total_pages):
+    """Renders the Previous/Page Info/Next buttons at the bottom."""
+    if total_pages <= 1:
+        return
+        
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("⬅️ Previous", key=f"prev_{key_prefix}", disabled=st.session_state[key_prefix] == 1, use_container_width=True):
+            st.session_state[key_prefix] -= 1
+            st.rerun()
+    with col2:
+        st.markdown(f"<div style='text-align:center; padding-top:10px; font-weight:600; color:#64748b; font-size:14px;'>Page {st.session_state[key_prefix]} of {total_pages}</div>", unsafe_allow_html=True)
+    with col3:
+        if st.button("Next ➡️", key=f"next_{key_prefix}", disabled=st.session_state[key_prefix] >= total_pages, use_container_width=True):
+            st.session_state[key_prefix] += 1
+            st.rerun()
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
 
 def render_metric_cards(total, approved, pending, rejected, current_filter, card_type="user"):
-    """Render 3 status metric cards as clickable buttons with styled overlaid HTML."""
+    """Render 4 status metric cards as clickable buttons with styled overlaid HTML."""
     prefix = f"{card_type}_"
 
-    c2, c3, c4 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.markdown(f"""
+        <div class="metric-card" style="background: white; border: 1px solid #e2e8f0; {'border: 2px solid #3b82f6;' if current_filter == 'ALL' else ''}">
+            <div class="metric-number" style="color: #475569;">{total}</div>
+            <div class="metric-label">📋 Total</div>
+        </div>""", unsafe_allow_html=True)
+        if st.button("Select All", key=f"{prefix}btn_all", use_container_width=True):
+            if card_type == "user":
+                st.session_state.user_status_filter = "ALL"
+                st.session_state.dashboard_page = 1
+            else:
+                st.session_state.status_filter = "ALL"
+                st.session_state.admin_review_page = 1
+            st.rerun()
 
     with c2:
         st.markdown(f"""
@@ -655,8 +894,10 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
         if st.button("Select Approved", key=f"{prefix}btn_approved", use_container_width=True):
             if card_type == "user":
                 st.session_state.user_status_filter = "APPROVED"
+                st.session_state.dashboard_page = 1
             else:
                 st.session_state.status_filter = "APPROVED"
+                st.session_state.admin_review_page = 1
             st.rerun()
 
     with c3:
@@ -668,8 +909,10 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
         if st.button("Select Pending", key=f"{prefix}btn_pending", use_container_width=True):
             if card_type == "user":
                 st.session_state.user_status_filter = "PENDING"
+                st.session_state.dashboard_page = 1
             else:
                 st.session_state.status_filter = "PENDING"
+                st.session_state.admin_review_page = 1
             st.rerun()
 
     with c4:
@@ -681,8 +924,10 @@ def render_metric_cards(total, approved, pending, rejected, current_filter, card
         if st.button("Select Rejected", key=f"{prefix}btn_rejected", use_container_width=True):
             if card_type == "user":
                 st.session_state.user_status_filter = "REJECTED"
+                st.session_state.dashboard_page = 1
             else:
                 st.session_state.status_filter = "REJECTED"
+                st.session_state.admin_review_page = 1
             st.rerun()
 
 
@@ -839,123 +1084,54 @@ if not is_admin:
 
         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
-        if submissions and st.session_state.user_status_filter != "ALL":
-            shown = 0
-            for sub in submissions:
-                if sub["status"] != st.session_state.user_status_filter:
-                    continue
-                shown += 1
+        if submissions:
+            if st.session_state.user_status_filter != "ALL":
+                filtered_subs = [s for s in submissions if s["status"] == st.session_state.user_status_filter]
+            else:
+                filtered_subs = submissions
+            
+            # Show simple message if no filtered results
+            if not filtered_subs:
+                msg = f"No {st.session_state.user_status_filter.lower()} applications found." if st.session_state.user_status_filter != "ALL" else "No applications found."
+                st.info(msg)
+            else:
+                paged_subs, start_idx, total_pages = paginate_list(filtered_subs, "dashboard_page", render_controls=False)
+                
+                # Tabular Header
+                h1, h2, h3, h4, h5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
+                h1.markdown("**S.No**")
+                h2.markdown("**Module Name**")
+                h3.markdown("**Submitted Date**")
+                h4.markdown("**Status**")
+                h5.markdown("**Action**")
+                st.markdown("<hr style='margin:0; margin-bottom:10px;'>", unsafe_allow_html=True)
 
-                module_label = (sub.get("module") or "").replace("_", " ").title()
-                status = sub["status"]
+                for i, sub in enumerate(paged_subs):
+                    s_no = start_idx + i + 1
+                    module_label = (sub.get("module") or "").replace("_", " ").title()
+                    status = sub["status"]
 
-                if status == "APPROVED":
-                    badge_html = '<span class="badge badge-approved">✅ Approved</span>'
-                    card_class = "approved"
-                elif status == "REJECTED":
-                    badge_html = '<span class="badge badge-rejected">❌ Rejected</span>'
-                    card_class = "rejected"
-                else:
-                    badge_html = '<span class="badge badge-pending">🕐 Pending Review</span>'
-                    card_class = "pending"
+                    if status == "APPROVED":
+                        badge_html = '<span class="badge badge-approved" style="padding:2px 8px; font-size:11px;">✅ Approved</span>'
+                    elif status == "REJECTED":
+                        badge_html = '<span class="badge badge-rejected" style="padding:2px 8px; font-size:11px;">❌ Rejected</span>'
+                    else:
+                        badge_html = '<span class="badge badge-pending" style="padding:2px 8px; font-size:11px;">🕐 Pending</span>'
 
-                submitted_date = fmt_dt(sub.get("created_at", ""))
-
-                with st.expander(f"📋 {module_label}  |  {submitted_date}", expanded=False):
-                    st.markdown(f"**Status:** {badge_html}", unsafe_allow_html=True)
-
-                    if sub["status"] == "REJECTED":
-                        if sub.get("rejection_reason"):
-                            st.error(f"**Rejection Reason:** {sub['rejection_reason']}")
-
-                        sub_module_key = sub.get("module") or ""
-                        sub_module_display = module_display_map.get(sub_module_key, "")
-
-                        if not sub_module_display:
-                            pass  # can't navigate, skip
-                        else:
-                            confirm_key = f"confirm_resubmit_{sub['id']}"
-
-                            # Check if user has an active draft for this module
-                            module_tables = sorted(modules.get(sub_module_key, []))
-                            has_draft = False
-                            if module_tables:
-                                has_draft = get_user_draft(module_tables[0], user_id) is not None
-
-                            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-                            if not st.session_state.get(confirm_key):
-                                # Normal button
-                                if st.button(
-                                    "✏️ Edit & Resubmit This Application",
-                                    key=f"resubmit_{sub['id']}",
-                                    use_container_width=True,
-                                    type="primary",
-                                ):
-                                    if has_draft:
-                                        # Show confirmation instead of navigating immediately
-                                        st.session_state[confirm_key] = True
-                                        st.rerun()
-                                    else:
-                                        # No draft conflict — go directly
-                                        st.session_state.resubmit_master_id = sub["id"]
-                                        st.session_state.resubmit_module = sub_module_key
-                                        st.session_state.nav_to_module = sub_module_display
-                                        for k in list(st.session_state.keys()):
-                                            if k.endswith("_initialized"):
-                                                del st.session_state[k]
-                                        st.rerun()
-
-                            else:
-                                # ---- Draft conflict warning ----
-                                st.warning(
-                                    "⚠️ **You have an unsubmitted draft application for this module.**\n\n"
-                                    "If you proceed, your draft data will be **erased** and replaced with "
-                                    "this rejected application's data.\n\n"
-                                    "**What would you like to do?**"
-                                )
-                                btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 1])
-
-                                with btn_col1:
-                                    if st.button(
-                                        "📝 Submit My Draft First",
-                                        key=f"go_draft_{sub['id']}",
-                                        use_container_width=True,
-                                    ):
-                                        # Navigate to the module form (draft is already there)
-                                        st.session_state[confirm_key] = False
-                                        st.session_state.nav_to_module = sub_module_display
-                                        st.rerun()
-
-                                with btn_col2:
-                                    if st.button(
-                                        "🗑️ Discard Draft & Edit Rejected",
-                                        key=f"discard_draft_{sub['id']}",
-                                        use_container_width=True,
-                                        type="primary",
-                                    ):
-                                        # Delete in-progress drafts for this user+module
-                                        delete_draft_by_user(int(user_id), module_tables)
-                                        st.session_state[confirm_key] = False
-                                        st.session_state.resubmit_master_id = sub["id"]
-                                        st.session_state.resubmit_module = sub_module_key
-                                        st.session_state.nav_to_module = sub_module_display
-                                        for k in list(st.session_state.keys()):
-                                            if k.endswith("_initialized"):
-                                                del st.session_state[k]
-                                        st.rerun()
-
-                                with btn_col3:
-                                    if st.button("✖ Cancel", key=f"cancel_resubmit_{sub['id']}"):
-                                        st.session_state[confirm_key] = False
-                                        st.rerun()
-
-
-                    full_data = get_full_submission_data(sub["id"])
-                    for section_name, df_section in full_data.items():
-                        clean_name = section_name.replace("_", " ").title()
-                        st.markdown(f"**📄 {clean_name}**")
-                        st.dataframe(df_section, use_container_width=True)
+                    submitted_date = fmt_dt(sub.get("created_at", ""))
+                    
+                    r1, r2, r3, r4, r5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
+                    r1.write(f"{s_no}")
+                    r2.write(module_label)
+                    r3.write(submitted_date)
+                    r4.markdown(badge_html, unsafe_allow_html=True)
+                    
+                    with r5:
+                        if st.button("🔍 View", key=f"btn_view_{sub['id']}", use_container_width=True):
+                            show_submission_details(sub, mode="user")
+                
+                # Navigation at bottom
+                render_pagination_footer("dashboard_page", total_pages)
 
         st.stop()
 
@@ -1432,41 +1608,54 @@ if is_admin:
     with tab_manage_users:
         st.markdown("### 👥 Manage Existing Users")
         st.markdown("View all users and toggle their access status.")
-        users_admin_df = get_all_users_admin()
         
-        if not users_admin_df.empty:
-            c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 3.5, 1.5])
-            c1.markdown("**Username**")
-            c2.markdown("**Role**")
-            c3.markdown("**Status**")
-            c4.markdown("**Allowed Modules**")
-            c5.markdown("**Action**")
+        raw_users_df = get_all_users_admin()
+        
+        if not raw_users_df.empty:
+            # Paginate the users (controls at bottom)
+            users_list = raw_users_df.to_dict('records')
+            paged_users, start_idx, total_pages = paginate_list(users_list, "manage_users_page", render_controls=False)
+            
+            c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2, 1.5, 1.5, 3.5, 1.5])
+            c1.markdown("**S.No**")
+            c2.markdown("**Username**")
+            c3.markdown("**Role**")
+            c4.markdown("**Status**")
+            c5.markdown("**Allowed Modules**")
+            c6.markdown("**Action**")
             st.markdown("<hr style='margin: 0; padding: 0;'>", unsafe_allow_html=True)
             
             def update_user_per_callback(uid, session_key):
+                # Guard: skip if we're in the middle of a logout or role changed
+                if st.session_state.get('logging_out') or not st.session_state.get('logged_in') or st.session_state.get('role') != 'admin':
+                    return
+                
                 new_mods = st.session_state.get(session_key, [])
                 update_user_modules(uid, new_mods)
-                st.toast(f"Permissions updated for user ID: {uid}")
+                st.toast(f"✅ Permissions updated for user ID: {uid}")
 
-            for _, row_usr in users_admin_df.iterrows():
+            for i, row_usr in enumerate(paged_users):
                 uid = row_usr['id']
                 uname = row_usr['username']
                 urole = row_usr['role']
                 is_active = row_usr.get('is_active', True)
                 allowed_str = row_usr.get('allowed_modules', '')
                 current_allowed = allowed_str.split(',') if allowed_str else []
+                s_no = start_idx + i + 1
                 
-                cc1, cc2, cc3, cc4, cc5 = st.columns([2, 1.5, 1.5, 3.5, 1.5])
+                cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([0.5, 2, 1.5, 1.5, 3.5, 1.5])
                 with cc1:
-                    st.markdown(f"<div style='padding-top:10px;'><b>{uname}</b></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='padding-top:10px;'>{s_no}</div>", unsafe_allow_html=True)
                 with cc2:
-                    st.markdown(f"<div style='padding-top:10px;'>{'Administrator' if urole == 'admin' else 'Operator'}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='padding-top:10px;'><b>{uname}</b></div>", unsafe_allow_html=True)
                 with cc3:
+                    st.markdown(f"<div style='padding-top:10px;'>{'Administrator' if urole == 'admin' else 'Operator'}</div>", unsafe_allow_html=True)
+                with cc4:
                     if is_active:
                         st.markdown("<div style='padding-top:10px;color:#10b981;font-weight:600;'>✅ Active</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div style='padding-top:10px;color:#ef4444;font-weight:600;'>❌ Revoked</div>", unsafe_allow_html=True)
-                with cc4:
+                with cc5:
                     if urole != 'admin':
                         st.multiselect(
                             "Modules",
@@ -1480,7 +1669,7 @@ if is_admin:
                         )
                     else:
                         st.markdown("<div style='padding-top:10px;color:#64748b;font-style:italic;'>Full Access</div>", unsafe_allow_html=True)
-                with cc5:
+                with cc6:
                     if st.session_state.user_id == uid:
                         st.button("Self", disabled=True, key=f"btn_{uid}", use_container_width=True)
                     elif urole == 'admin':
@@ -1492,6 +1681,9 @@ if is_admin:
                             toggle_user_status(uid, is_active)
                             st.rerun()
                 st.markdown("<hr style='margin: 0; padding: 0;'>", unsafe_allow_html=True)
+            
+            # Show pagination controls at the bottom
+            render_pagination_footer("manage_users_page", total_pages)
 
     with tab_review:
         # ---- User Selector ----
@@ -1518,6 +1710,13 @@ if is_admin:
             )
 
             if selected_user != "--- Select Applicant ---":
+                # Reset page if user changed
+                if "prev_selected_user" not in st.session_state:
+                    st.session_state.prev_selected_user = selected_user
+                if st.session_state.prev_selected_user != selected_user:
+                    st.session_state.admin_review_page = 1
+                    st.session_state.prev_selected_user = selected_user
+
                 user_row = users_df[users_df["username"] == selected_user].iloc[0]
                 selected_user_id = int(user_row["id"])
 
@@ -1545,113 +1744,72 @@ if is_admin:
                 # ---- Submission List ----
                 submissions = get_user_master_submissions_admin(selected_user_id)
 
-                if submissions and st.session_state.status_filter != "ALL":
-                    st.markdown("#### 📋 Submissions")
+                if submissions:
+                    if st.session_state.status_filter != "ALL":
+                        filtered_subs = [s for s in submissions if s["status"] == st.session_state.status_filter]
+                    else:
+                        filtered_subs = submissions
+                    
+                    if not filtered_subs:
+                        st.info(f"No {st.session_state.status_filter.lower()} applications found." if st.session_state.status_filter != "ALL" else "No applications found.")
+                    else:
+                        st.markdown("#### 📋 Submissions")
+                        paged_subs, start_idx, total_pages = paginate_list(filtered_subs, "admin_review_page", render_controls=False)
 
-                    for sub in submissions:
+                        # Tabular Header
+                        h1, h2, h3, h4, h5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
+                        h1.markdown("**S.No**")
+                        h2.markdown("**Module Name**")
+                        h3.markdown("**Submitted Date**")
+                        h4.markdown("**Status**")
+                        h5.markdown("**Action**")
+                        st.markdown("<hr style='margin:0; margin-bottom:10px;'>", unsafe_allow_html=True)
 
-                        if st.session_state.status_filter != "ALL":
-                            if sub["status"] != st.session_state.status_filter:
-                                continue
+                        for i, sub in enumerate(paged_subs):
+                            s_no = start_idx + i + 1
+                            module_name = sub.get("module")
+                            module_label = (module_name or "Unknown").replace("_", " ").title()
+                            status = sub["status"]
 
-                        module_name = sub.get("module")
-                        module_label = (module_name or "Unknown").replace("_", " ").title()
-                        status = sub["status"]
+                            if status == "APPROVED":
+                                badge_html = '<span class="badge badge-approved" style="padding:2px 8px; font-size:11px;">✅ Approved</span>'
+                            elif status == "REJECTED":
+                                badge_html = '<span class="badge badge-rejected" style="padding:2px 8px; font-size:11px;">❌ Rejected</span>'
+                            else:
+                                badge_html = '<span class="badge badge-pending" style="padding:2px 8px; font-size:11px;">🕐 Pending</span>'
 
-                        if status == "APPROVED":
-                            badge_html = '<span class="badge badge-approved">✅ Approved</span>'
-                        elif status == "REJECTED":
-                            badge_html = '<span class="badge badge-rejected">❌ Rejected</span>'
-                        else:
-                            badge_html = '<span class="badge badge-pending">🕐 Pending Review</span>'
+                            # ---- Timeline Card ----
+                            created_at  = sub.get("created_at", "")
+                            approved_at = sub.get("approved_at", "")
+                            rejected_at = sub.get("rejected_at", "")
+                            reason      = sub.get("rejection_reason", "")
 
-                        # ---- Timeline Card ----
-                        created_at  = sub.get("created_at", "")
-                        approved_at = sub.get("approved_at", "")
-                        rejected_at = sub.get("rejected_at", "")
-                        reason      = sub.get("rejection_reason", "")
+                            # Build extra rows for timeline
+                            if status == "APPROVED" and approved_at:
+                                extra_rows = f'<div class="timeline-row"><div class="timeline-dot" style="background:#10b981"></div><span><b>Approved:</b> {fmt_dt(approved_at)}</span></div>'
+                            elif status == "REJECTED":
+                                extra_rows = ""
+                                if rejected_at:
+                                    extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#ef4444"></div><span><b>Rejected:</b> {fmt_dt(rejected_at)}</span></div>'
+                                if reason:
+                                    extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#f97316"></div><span><b>Reason:</b> {reason}</span></div>'
+                            else:
+                                extra_rows = '<div class="timeline-row"><div class="timeline-dot" style="background:#f59e0b"></div><span><b>Status:</b> Awaiting review</span></div>'
 
-                        # Build extra rows without any leading whitespace (prevents Markdown code-block treatment)
-                        if status == "APPROVED" and approved_at:
-                            extra_rows = f'<div class="timeline-row"><div class="timeline-dot" style="background:#10b981"></div><span><b>Approved:</b> {fmt_dt(approved_at)}</span></div>'
-                        elif status == "REJECTED":
-                            extra_rows = ""
-                            if rejected_at:
-                                extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#ef4444"></div><span><b>Rejected:</b> {fmt_dt(rejected_at)}</span></div>'
-                            if reason:
-                                extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#f97316"></div><span><b>Reason:</b> {reason}</span></div>'
-                        else:
-                            extra_rows = '<div class="timeline-row"><div class="timeline-dot" style="background:#f59e0b"></div><span><b>Status:</b> Awaiting review</span></div>'
+                            submitted_str = fmt_dt(created_at)
 
-                        submitted_str = fmt_dt(created_at)
-
-                        timeline_html = (
-                            f'<div class="timeline-card">'
-                            f'<div style="font-weight:700;margin-bottom:10px;font-size:14px;color:#1e3a5f;">'
-                            f'🕒 Submission Timeline &mdash; {module_label}&nbsp;&nbsp;{badge_html}'
-                            f'</div>'
-                            f'<div class="timeline-row">'
-                            f'<div class="timeline-dot" style="background:#3b82f6"></div>'
-                            f'<span><b>Submitted:</b> {submitted_str}</span>'
-                            f'</div>'
-                            f'{extra_rows}'
-                            f'</div>'
-                        )
-                        st.markdown(timeline_html, unsafe_allow_html=True)
-
-                        # ---- Submission Detail ----
-                        with st.expander(f"📄 View Form Details — {module_label}", expanded=False):
-
-                            full_data = get_full_submission_data(sub["id"])
-
-                            for section_name, df_section in full_data.items():
-                                clean_name = (
-                                    section_name.replace(module_name + "_", "")
-                                    .replace("_", " ")
-                                    .title()
-                                )
-                                st.markdown(f"**📄 {clean_name}**")
-                                st.dataframe(df_section, use_container_width=True)
-
-                            st.markdown("---")
-                            st.markdown("### ⚖️ Review Decision")
-
-                            col_approve, col_reject, col_download = st.columns([1, 2, 1])
-
-                            with col_approve:
-                                st.markdown('<div class="approve-btn">', unsafe_allow_html=True)
-                                if st.button("✅ Approve", key=f"a{sub['id']}", use_container_width=True):
-                                    approve_master_submission(sub["id"])
-                                    st.success("Application approved successfully.")
-                                    st.rerun()
-                                st.markdown('</div>', unsafe_allow_html=True)
-
-                            with col_reject:
-                                reason_input = st.text_input(
-                                    "Rejection Reason (required before rejecting)",
-                                    key=f"r{sub['id']}",
-                                    placeholder="Explain why this application is being rejected..."
-                                )
-                                st.markdown('<div class="reject-btn">', unsafe_allow_html=True)
-                                if st.button("❌ Reject", key=f"rej{sub['id']}", use_container_width=True):
-                                    if not reason_input.strip():
-                                        st.error("⚠️ Please enter a rejection reason before rejecting.")
-                                    else:
-                                        reject_master_submission(sub["id"], reason_input)
-                                        st.success("Application rejected.")
-                                        st.rerun()
-                                st.markdown('</div>', unsafe_allow_html=True)
-
-                            with col_download:
-                                pdf = export_master_submission_pdf(sub["id"])
-                                st.download_button(
-                                    "📥 Download PDF",
-                                    pdf,
-                                    file_name=f"{selected_user}_cycle_{sub['cycle']}.pdf",
-                                    mime="application/pdf",
-                                    key=f"pdf_{sub['id']}",
-                                    use_container_width=True,
-                                )
+                            r1, r2, r3, r4, r5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
+                            r1.write(f"{s_no}")
+                            r2.write(module_label)
+                            r3.write(submitted_str)
+                            r4.markdown(badge_html, unsafe_allow_html=True)
+                            
+                            with r5:
+                                if st.button("🔍 Review", key=f"btn_rev_{sub['id']}", use_container_width=True):
+                                    show_submission_details(sub, mode="admin")
+                        
+                        # Navigation at bottom
+                        render_pagination_footer("admin_review_page", total_pages)
 
                 elif st.session_state.status_filter != "ALL":
                     st.markdown("""

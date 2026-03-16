@@ -258,18 +258,20 @@ def get_user_master_submissions(user_id, module):
 
         if module:
             cur.execute("""
-                SELECT *
-                FROM master_submission
-                WHERE user_id=%s
-                AND module=%s
-                ORDER BY cycle DESC
+                SELECT m.*, u.username as created_by_user
+                FROM master_submission m
+                JOIN users u ON m.user_id = u.id
+                WHERE m.user_id=%s
+                AND m.module=%s
+                ORDER BY m.cycle DESC
             """, (user_id, module))
         else:
             cur.execute("""
-                SELECT *
-                FROM master_submission
-                WHERE user_id=%s
-                ORDER BY cycle DESC
+                SELECT m.*, u.username as created_by_user
+                FROM master_submission m
+                JOIN users u ON m.user_id = u.id
+                WHERE m.user_id=%s
+                ORDER BY m.cycle DESC
             """, (user_id,))
             
         columns = [desc[0] for desc in cur.description]
@@ -293,10 +295,11 @@ def get_user_master_submissions_admin(user_id):
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT *
-            FROM master_submission
-            WHERE user_id=%s
-            ORDER BY cycle DESC
+            SELECT m.*, u.username as created_by_user
+            FROM master_submission m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.user_id=%s
+            ORDER BY m.cycle DESC
         """, (user_id,))
 
         columns = [desc[0] for desc in cur.description]
@@ -565,13 +568,14 @@ def export_master_submission_pdf(master_id):
     try:
         conn = get_connection()
 
-        # 🔥 Fetch master status and rejection reason
+        # 🔥 Fetch master status, rejection reason and username
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT status, rejection_reason, module
-            FROM master_submission
-            WHERE id=%s
+            SELECT m.status, m.rejection_reason, m.module, u.username as created_by_user
+            FROM master_submission m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.id=%s
         """,
             (master_id,),
         )
@@ -580,6 +584,8 @@ def export_master_submission_pdf(master_id):
 
         status = master_row[0] if master_row else ""
         rejection_reason = master_row[1] if master_row else None
+        module_val = master_row[2] if master_row else ""
+        created_by_user = master_row[3] if master_row else "Unknown"
 
         tables = get_all_tables(conn)
 
@@ -596,6 +602,12 @@ def export_master_submission_pdf(master_id):
         styles = getSampleStyleSheet()
 
         # 🔥 Add Application Status at top
+        elements.append(
+            Paragraph(f"<b>Submitted By:</b> {created_by_user}", styles["Heading2"])
+        )
+        elements.append(
+            Paragraph(f"<b>Module:</b> {module_val.replace('_', ' ').title()}", styles["Heading2"])
+        )
         elements.append(
             Paragraph(f"<b>Application Status:</b> {status}", styles["Heading2"])
         )
@@ -620,6 +632,17 @@ def export_master_submission_pdf(master_id):
             df = pd.read_sql(
                 f'SELECT * FROM "{table}" WHERE master_id=%s', conn, params=[master_id]
             )
+
+            if df.empty:
+                continue
+
+            # 🔥 Filter out system columns requested by user
+            cols_to_exclude = [
+                'status', 'approval_status', 'created_by', 'approved_by', 
+                'approved_at', 'rejected_at', 'is_draft', 'master_id', 
+                'id', 'created_at', 'updated_at', 'draft_id'
+            ]
+            df = df.drop(columns=[c for c in cols_to_exclude if c in df.columns])
 
             if df.empty:
                 continue
