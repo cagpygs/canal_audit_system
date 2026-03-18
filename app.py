@@ -1730,12 +1730,12 @@ if is_admin:
             """, unsafe_allow_html=True)
         else:
             st.markdown("#### 👤 Select an Applicant to Review")
-            applicant_options = ["--- Select Applicant ---"] + list(users_df["username"])
+            applicant_options = ["--- Select Applicant ---", "🌐 All Users"] + list(users_df["username"])
             selected_user = st.selectbox(
                 "Applicant",
                 applicant_options,
                 label_visibility="collapsed",
-                help="Choose the user whose applications you want to review"
+                help="Choose 'All Users' to see every submission, or pick a specific applicant"
             )
 
             if selected_user != "--- Select Applicant ---":
@@ -1746,40 +1746,85 @@ if is_admin:
                     st.session_state.admin_review_page = 1
                     st.session_state.prev_selected_user = selected_user
 
-                user_row = users_df[users_df["username"] == selected_user].iloc[0]
-                selected_user_id = int(user_row["id"])
+                is_all_users = (selected_user == "🌐 All Users")
+
+                if not is_all_users:
+                    user_row = users_df[users_df["username"] == selected_user].iloc[0]
+                    selected_user_id = int(user_row["id"])
 
                 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-                # ---- Status Counts ----
-                approved, rejected, pending, drafts = get_user_master_status_counts(selected_user_id, all_modules)
-                total = approved + rejected + pending + drafts
+                # ---- Status Counts & Submissions ----
+                if is_all_users:
+                    # Aggregate submissions from all non-admin users
+                    all_masters = []
+                    all_drafts = []
+                    agg_approved = agg_rejected = agg_pending = agg_drafts = 0
 
-                st.markdown("#### 📊 Submission Overview")
-                
-                if total == 0:
-                    st.markdown(f"""
-                    <div class="empty-state">
-                        <div class="empty-icon">🔍</div>
-                        <p>No activity found for <b>{selected_user}</b>.</p>
-                        <small>This user has no submissions or drafts currently.</small>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    for _, u_row in users_df.iterrows():
+                        uid = int(u_row["id"])
+                        uname = u_row["username"]
+                        u_approved, u_rejected, u_pending, u_drafts = get_user_master_status_counts(uid, all_modules)
+                        agg_approved += u_approved
+                        agg_rejected += u_rejected
+                        agg_pending  += u_pending
+                        agg_drafts   += u_drafts
+
+                        u_masters = get_user_master_submissions_admin(uid)
+                        all_masters.extend(u_masters)
+
+                        u_draft_sums = get_user_draft_summaries(uid, all_modules)
+                        for d in u_draft_sums:
+                            d["created_by_user"] = uname
+                        all_drafts.extend(u_draft_sums)
+
+                    total = agg_approved + agg_rejected + agg_pending + agg_drafts
+                    submissions = all_masters + all_drafts
+                    # Sort by created_at descending
+                    submissions.sort(
+                        key=lambda x: str(x.get("created_at") or ""),
+                        reverse=True
+                    )
+
+                    st.markdown("#### 📊 Submission Overview Of – All Users")
+                    if total == 0:
+                        st.markdown("""
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <p>No applications found across all users.</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        render_metric_cards(total, agg_approved, agg_pending, agg_rejected,
+                                            st.session_state.status_filter, card_type="admin", drafts=agg_drafts)
+
                 else:
-                    render_metric_cards(total, approved, pending, rejected, st.session_state.status_filter, card_type="admin", drafts=drafts)
+                    # Single user
+                    approved, rejected, pending, drafts = get_user_master_status_counts(selected_user_id, all_modules)
+                    total = approved + rejected + pending + drafts
+
+                    st.markdown(f"#### 📊 Submission Overview Of – {selected_user}")
+                    if total == 0:
+                        st.markdown(f"""
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <p>No activity found for <b>{selected_user}</b>.</p>
+                            <small>This user has no submissions or drafts currently.</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        render_metric_cards(total, approved, pending, rejected,
+                                            st.session_state.status_filter, card_type="admin", drafts=drafts)
+
+                    masters = get_user_master_submissions_admin(selected_user_id)
+                    draft_summaries = get_user_draft_summaries(selected_user_id, all_modules)
+                    for d in draft_summaries:
+                        d["created_by_user"] = selected_user
+                    submissions = masters + draft_summaries
 
                 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
                 # ---- Submission List ----
-                masters = get_user_master_submissions_admin(selected_user_id)
-                draft_summaries = get_user_draft_summaries(selected_user_id, all_modules)
-                
-                # Attach creator name to drafts
-                for d in draft_summaries:
-                    d["created_by_user"] = selected_user
-
-                submissions = masters + draft_summaries
-
                 if submissions:
                     if st.session_state.status_filter != "ALL":
                         filtered_subs = [s for s in submissions if s["status"] == st.session_state.status_filter]
@@ -1792,13 +1837,22 @@ if is_admin:
                         st.markdown("#### 📋 Activity List")
                         paged_subs, start_idx, total_pages = paginate_list(filtered_subs, "admin_review_page", render_controls=False)
 
-                        # Tabular Header
-                        h1, h2, h3, h4, h5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
-                        h1.markdown("**S.No**")
-                        h2.markdown("**Module Name**")
-                        h3.markdown("**Submitted Date**")
-                        h4.markdown("**Status**")
-                        h5.markdown("**Action**")
+                        # Tabular Header — show Submitted By column when All Users is selected
+                        if is_all_users:
+                            h1, h2, h3, h4, h5, h6 = st.columns([0.5, 2, 1.5, 1.5, 1.5, 1.5])
+                            h1.markdown("**S.No**")
+                            h2.markdown("**Module Name**")
+                            h3.markdown("**Submitted By**")
+                            h4.markdown("**Submitted Date**")
+                            h5.markdown("**Status**")
+                            h6.markdown("**Action**")
+                        else:
+                            h1, h2, h3, h4, h5 = st.columns([0.5, 2, 1.8, 1.2, 1])
+                            h1.markdown("**S.No**")
+                            h2.markdown("**Module Name**")
+                            h3.markdown("**Submitted Date**")
+                            h4.markdown("**Status**")
+                            h5.markdown("**Action**")
                         st.markdown("<hr style='margin:0; margin-bottom:10px;'>", unsafe_allow_html=True)
 
                         for i, sub in enumerate(paged_subs):
@@ -1806,6 +1860,7 @@ if is_admin:
                             module_name = sub.get("module")
                             module_label = (module_name or "Unknown").replace("_", " ").title()
                             status = sub["status"]
+                            submitted_by = sub.get("created_by_user") or "—"
 
                             if status == "APPROVED":
                                 badge_html = '<span class="badge badge-approved" style="padding:2px 8px; font-size:11px;">✅ Approved</span>'
@@ -1816,36 +1871,34 @@ if is_admin:
                             else:
                                 badge_html = '<span class="badge badge-pending" style="padding:2px 8px; font-size:11px;">🕐 Pending</span>'
 
-                            # ---- Timeline Card ----
                             created_at  = sub.get("created_at", "")
                             approved_at = sub.get("approved_at", "")
                             rejected_at = sub.get("rejected_at", "")
                             reason      = sub.get("rejection_reason", "")
 
-                            # Build extra rows for timeline
-                            if status == "APPROVED" and approved_at:
-                                extra_rows = f'<div class="timeline-row"><div class="timeline-dot" style="background:#10b981"></div><span><b>Approved:</b> {fmt_dt(approved_at)}</span></div>'
-                            elif status == "REJECTED":
-                                extra_rows = ""
-                                if rejected_at:
-                                    extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#ef4444"></div><span><b>Rejected:</b> {fmt_dt(rejected_at)}</span></div>'
-                                if reason:
-                                    extra_rows += f'<div class="timeline-row"><div class="timeline-dot" style="background:#f97316"></div><span><b>Reason:</b> {reason}</span></div>'
-                            else:
-                                extra_rows = '<div class="timeline-row"><div class="timeline-dot" style="background:#f59e0b"></div><span><b>Status:</b> Awaiting review</span></div>'
-
                             submitted_str = fmt_dt(created_at)
 
-                            r1, r2, r3, r4, r5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
-                            r1.write(f"{s_no}")
-                            r2.write(module_label)
-                            r3.write(submitted_str)
-                            r4.markdown(badge_html, unsafe_allow_html=True)
-                            
-                            with r5:
-                                btn_label = "🔍 View" if status == "DRAFT" else "🔍 Review"
-                                if st.button(btn_label, key=f"btn_rev_{sub['id']}", use_container_width=True):
-                                    show_submission_details(sub, mode="admin")
+                            if is_all_users:
+                                r1, r2, r3, r4, r5, r6 = st.columns([0.5, 2, 1.5, 1.5, 1.5, 1.5])
+                                r1.write(f"{s_no}")
+                                r2.write(module_label)
+                                r3.write(submitted_by)
+                                r4.write(submitted_str)
+                                r5.markdown(badge_html, unsafe_allow_html=True)
+                                with r6:
+                                    btn_label = "🔍 View" if status == "DRAFT" else "🔍 Review"
+                                    if st.button(btn_label, key=f"btn_rev_{sub['id']}_{i}", use_container_width=True):
+                                        show_submission_details(sub, mode="admin")
+                            else:
+                                r1, r2, r3, r4, r5 = st.columns([0.5, 2.5, 2, 1.5, 1.5])
+                                r1.write(f"{s_no}")
+                                r2.write(module_label)
+                                r3.write(submitted_str)
+                                r4.markdown(badge_html, unsafe_allow_html=True)
+                                with r5:
+                                    btn_label = "🔍 View" if status == "DRAFT" else "🔍 Review"
+                                    if st.button(btn_label, key=f"btn_rev_{sub['id']}_{i}", use_container_width=True):
+                                        show_submission_details(sub, mode="admin")
                         
                         # Navigation at bottom
                         render_pagination_footer("admin_review_page", total_pages)
