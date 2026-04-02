@@ -4,7 +4,6 @@ from psycopg2 import pool
 import pandas as pd
 import streamlit as st
 from psycopg2 import sql
-
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -217,18 +216,18 @@ def save_draft_record(table, data, user_id, master_id=None):
 
 
 # ================= CREATE MASTER SUBMISSION =================
-def create_master_submission(user_id, module, tables, status='COMPLETED', estimate_number=None, year_of_estimate=None):
+def create_master_submission(user_id, module, tables, status='COMPLETED', estimate_number=None, year_of_estimate=None, name_of_project=None):
     user_id = int(user_id)
     
-    # Hard uniqueness check for (estimate_number, year_of_estimate) - ONLY for contract management
-    if module == "contract_management" and estimate_number and year_of_estimate:
+    # Hard uniqueness check for (name_of_project, estimate_number, year_of_estimate) 
+    # ONLY for contract management
+    if module == "contract_management" and name_of_project and estimate_number and year_of_estimate:
 
-        # Check if already exists in master_submission (within this module)
-        existing = get_submissions_by_estimate(estimate_number, year_of_estimate, module=module)
+        # Check if exactly this combination already exists 
+        existing = get_submissions_by_estimate(estimate_number, year_of_estimate, module=module, name_of_project=name_of_project)
 
         if existing:
-            yr_str = year_of_estimate.strftime("%Y") if hasattr(year_of_estimate, 'strftime') else str(year_of_estimate)
-            raise ValueError(f"An application with Estimate Number '{estimate_number}' and Year '{yr_str}' already exists.")
+            raise ValueError(f"An application with Name: '{name_of_project}', Estimate No: '{estimate_number}' and Year: '{year_of_estimate}' already exists.")
 
     cycle = get_next_cycle(user_id, module)
 
@@ -241,11 +240,11 @@ def create_master_submission(user_id, module, tables, status='COMPLETED', estima
 
         cur.execute(
             """
-            INSERT INTO master_submission (user_id, cycle, status, module, created_at, estimate_number, year_of_estimate)
-            VALUES (%s, %s, %s, %s, NOW(), %s, %s)
+            INSERT INTO master_submission (user_id, cycle, status, module, created_at, estimate_number, year_of_estimate, name_of_project)
+            VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s)
             RETURNING id
         """,
-            (user_id, cycle, status, module, estimate_number, year_of_estimate),
+            (user_id, cycle, status, module, estimate_number, year_of_estimate, name_of_project),
         )
 
         master_id = cur.fetchone()[0]
@@ -373,11 +372,11 @@ def get_user_master_submissions_admin(user_id):
             release_connection(conn)
 
 
-def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None):
+
+def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None, name_of_project=None):
     """
-    Fetches all master_submission records matching a specific estimate number and year.
-    If module is provided, filters for that specific module.
-    If user_id is provided, filters for that user.
+    Returns submissions by exact match of estimate number and financial year string.
+    Optionally filters by name_of_project.
     """
     conn = None
     cur = None
@@ -385,7 +384,7 @@ def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None):
         conn = get_connection()
         cur = conn.cursor()
 
-        # Basic validation to avoid SQL errors for placeholders like '---' or empty values
+        # Basic validation to avoid SQL errors
         if not est_no or str(est_no).strip() == "---" or not est_yr or str(est_yr).strip() == "---":
             return []
 
@@ -394,9 +393,13 @@ def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None):
             FROM master_submission m
             JOIN users u ON m.user_id = u.id
             WHERE LOWER(m.estimate_number) = LOWER(%s) 
-              AND EXTRACT(YEAR FROM m.year_of_estimate) = EXTRACT(YEAR FROM %s::DATE)
+              AND m.year_of_estimate = %s
         """
         params = [est_no, est_yr]
+
+        if name_of_project:
+            query += " AND LOWER(m.name_of_project) = LOWER(%s)"
+            params.append(name_of_project)
 
         if user_id:
             query += " AND m.user_id = %s"
@@ -752,13 +755,8 @@ def export_master_submission_pdf(master_id):
         est_no = master_row[2] if master_row else "---"
         est_yr = master_row[3] if master_row else "---"
         
-        # Format the year (est_yr is now a DATE)
-        formatted_yr = "---"
-        if est_yr and est_yr != "---":
-            if isinstance(est_yr, (datetime.date, datetime.datetime)):
-                formatted_yr = est_yr.strftime("%Y")
-            else:
-                formatted_yr = str(est_yr)
+        # Format the year (est_yr is now a string like '2024-25')
+        formatted_yr = str(est_yr) if est_yr else "---"
         
         display_key = f"{est_no} ({formatted_yr})" if est_no != "---" else "---"
 

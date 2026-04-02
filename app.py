@@ -248,6 +248,8 @@ def clear_module_state(m_key=None):
         del st.session_state["initial_estimate_number"]
     if "initial_year_of_estimate" in st.session_state:
         del st.session_state["initial_year_of_estimate"]
+    if "initial_name_of_project" in st.session_state:
+        del st.session_state["initial_name_of_project"]
     
     # 3. If a module key is provided, also delete unattached DB drafts and clear its specific table entries
     if m_key:
@@ -385,7 +387,7 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
     """
     Shows all master_submission records for a specific estimate number and year.
     """
-    y_val = est_yr.year if hasattr(est_yr, 'year') else est_yr
+    y_val = est_yr
     st.markdown(f"#### 📜 Grouped by Estimate: **{est_no}** ({y_val})")
     
     is_admin_user = st.session_state.get("role") == "admin"
@@ -398,6 +400,16 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
                 st.session_state.trigger_new_app_from_modal = True
                 st.session_state.initial_estimate_number = est_no
                 st.session_state.initial_year_of_estimate = est_yr
+                # Check if available in group submissions
+                submissions = get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None)
+                if submissions:
+                    try:
+                        s_data = get_full_submission_data(submissions[0]['id'])
+                        first_table = list(s_data.keys())[0] if s_data else None
+                        if first_table and 'name_of_project' in s_data[first_table].columns:
+                            st.session_state.initial_name_of_project = s_data[first_table].iloc[0]['name_of_project']
+                    except Exception:
+                        pass
                 st.rerun()
         st.markdown("<div style='height:15px'></div>", unsafe_allow_html=True)
     
@@ -504,12 +516,13 @@ def show_new_application_dialog():
     # Show estimate inputs if Contract Management is selected
     if selected_m == "contract_management":
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        st.text_input("Name of Project", placeholder="Enter Name of Project", key="header_modal_nm_proj")
         ce1, ce2 = st.columns(2)
         with ce1:
             st.text_input("Estimate Number", placeholder="Enter Estimate Number", key="header_modal_est_no")
         with ce2:
             current_year = datetime.datetime.now().year
-            year_options = list(range(current_year, 1999, -1))
+            year_options = [f"{y}-{str(y+1)[2:]}" for y in range(current_year, 1999, -1)]
             st.selectbox("Year of Estimate", options=year_options, key="header_modal_est_yr")
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
@@ -519,13 +532,13 @@ def show_new_application_dialog():
         if selected_m == "contract_management":
              est_no = st.session_state.get("header_modal_est_no", "").strip()
              est_yr = st.session_state.get("header_modal_est_yr")
-             if not est_no or not est_yr:
-                 st.error("⚠️ Please enter Estimate Number and Year.")
+             nm_proj = st.session_state.get("header_modal_nm_proj", "").strip()
+             if not est_no or not est_yr or not nm_proj:
+                 st.error("⚠️ Please enter Name of Project, Estimate Number and Year.")
                  return
              
-             # Check for existing drafts
-             est_yr_date = datetime.date(est_yr, 1, 1) if isinstance(est_yr, int) else est_yr
-             existing_ones = get_submissions_by_estimate(est_no, est_yr_date, module=selected_m)
+             # Check for existing drafts (must match Project + Est No + Year)
+             existing_ones = get_submissions_by_estimate(est_no, est_yr, module=selected_m, name_of_project=nm_proj)
 
              if existing_ones:
                  st.session_state.active_modal_data = {
@@ -540,13 +553,32 @@ def show_new_application_dialog():
         clear_module_state(selected_m)
         
         # Then set the NEW initial values
+        initial_est_no = None
+        initial_est_yr = None
+        initial_nm_proj = None
         if selected_m == "contract_management":
+             initial_est_no = est_no
+             initial_est_yr = est_yr
+             initial_nm_proj = nm_proj
              st.session_state.initial_estimate_number = est_no
              st.session_state.initial_year_of_estimate = est_yr
+             st.session_state.initial_name_of_project = nm_proj
         
-        st.session_state.master_id = None
-        st.session_state.current_view = selected_m
-        st.rerun()
+        # --- CREATE MASTER RECORD IMMEDIATELY ---
+        try:
+             target_m_id = create_master_submission(
+                 user_id, selected_m, modules.get(selected_m, []), 
+                 status='DRAFT',
+                 estimate_number=initial_est_no,
+                 year_of_estimate=initial_est_yr,
+                 name_of_project=initial_nm_proj
+             )
+             st.session_state.master_id = target_m_id
+             st.session_state.current_view = selected_m
+             st.rerun()
+        except Exception as e:
+             st.error(f"❌ Error starting application: {e}")
+             return
 
     if st.button("✖️ Close", use_container_width=True):
         st.rerun()
@@ -771,10 +803,12 @@ if not is_admin:
         # Save values before clearing
         saved_no = st.session_state.get("initial_estimate_number")
         saved_yr = st.session_state.get("initial_year_of_estimate")
+        saved_nm = st.session_state.get("initial_name_of_project")
         clear_module_state("contract_management")
         # Restore values
         st.session_state.initial_estimate_number = saved_no
         st.session_state.initial_year_of_estimate = saved_yr
+        st.session_state.initial_name_of_project = saved_nm
 
         st.session_state.master_id = None
         st.session_state.current_view = "contract_management"
@@ -1021,8 +1055,24 @@ if not is_admin:
 
     # ---- Module Form Area ----
 
+    CUSTOM_TABLE_ORDER = {
+        "contract_management": [
+            "contract_management_admin_financial_sanction",
+            "contract_management_technical_sanction",
+            "contract_management_tender_award_contract",
+            "contract_management_contract_master",
+            "contract_management_payments_recoveries",
+            "contract_management_budget_summary"
+        ]
+    }
+
     module_name = current_view_key
-    tables = sorted(modules[module_name])
+    if module_name in CUSTOM_TABLE_ORDER:
+        ordered = [t for t in CUSTOM_TABLE_ORDER[module_name] if t in modules.get(module_name, [])]
+        others = sorted([t for t in modules.get(module_name, []) if t not in CUSTOM_TABLE_ORDER[module_name]])
+        tables = ordered + others
+    else:
+        tables = sorted(modules.get(module_name, []))
     prefix = module_name + "_"
 
     if st.session_state.master_id:
@@ -1087,13 +1137,16 @@ if not is_admin:
 
     estimate_number = None
     year_of_estimate = None
+    name_of_project = None
     if first_table_draft:
         estimate_number = first_table_draft.get("estimate_number")
         year_of_estimate = first_table_draft.get("year_of_estimate")
+        name_of_project = first_table_draft.get("name_of_project")
     elif module_name == "contract_management":
         # Check for initial values from Main page
         estimate_number = st.session_state.get("initial_estimate_number")
         year_of_estimate = st.session_state.get("initial_year_of_estimate")
+        name_of_project = st.session_state.get("initial_name_of_project")
 
     for i, table in enumerate(tables):
 
@@ -1148,10 +1201,12 @@ if not is_admin:
                                 val = val.year if hasattr(val, 'year') else val
                         else:
                             val = str(val)
-                            # Handle year extraction from string date format (e.g. 2026-01-01) for text fields
-                            if col == "year_of_estimate" and "-" in val:
-                                try: val = val.split("-")[0]
-                                except: pass
+                        # Handle year conversion if still in date format (e.g. 2026-01-01)
+                        if col == "year_of_estimate" and "-" in str(val) and len(str(val)) > 7:
+                            try: 
+                                y = int(str(val).split("-")[0])
+                                val = f"{y}-{str(y+1)[2:]}"
+                            except: pass
                         st.session_state[key] = val
                     else:
                         # Fallback for new applications (no draft yet)
@@ -1175,6 +1230,8 @@ if not is_admin:
                                     st.session_state[key] = val
                                 else:
                                     st.session_state[key] = str(val)
+                            elif col == "name_of_project" and st.session_state.get("initial_name_of_project"):
+                                st.session_state[key] = str(st.session_state.initial_name_of_project)
 
                 st.session_state[f"{table}_initialized"] = True
 
@@ -1192,7 +1249,7 @@ if not is_admin:
                         col = col_info["column_name"]
                         
                         # Skip Estimate fields for non-contract modules
-                        if col in ["estimate_number", "year_of_estimate"] and module_name != "contract_management":
+                        if col in ["estimate_number", "year_of_estimate", "name_of_project"] and module_name != "contract_management":
                             continue
                             
                         dtype = col_info["data_type"]
@@ -1206,7 +1263,7 @@ if not is_admin:
                                 label = f"{label} (₹)"
 
                             # Disable estimate fields for contract_management
-                            is_disabled = (module_name == "contract_management" and col in ["estimate_number", "year_of_estimate"])
+                            is_disabled = (module_name == "contract_management" and col in ["estimate_number", "year_of_estimate", "name_of_project"])
 
                             if dtype in ("integer", "bigint", "smallint"):
                                 value = st.number_input(label, step=1, key=key, disabled=is_disabled)
@@ -1217,7 +1274,7 @@ if not is_admin:
                             elif dtype == "date":
                                 if col == "year_of_estimate":
                                     current_year = datetime.datetime.now().year
-                                    year_options = list(range(current_year, 1999, -1))
+                                    year_options = [f"{y}-{str(y+1)[2:]}" for y in range(current_year, 1999, -1)]
                                     value = st.selectbox(label, options=year_options, key=key, disabled=is_disabled)
                                 else:
                                     value = st.date_input(label, key=key, disabled=is_disabled)
@@ -1241,10 +1298,9 @@ if not is_admin:
                                 value = st.text_input(label, key=key, disabled=is_disabled)
 
                         form_data[col] = value
-                        # Convert year selectbox integer back to date for DB
-                        if col == "year_of_estimate" and isinstance(value, int):
-                            form_data[col] = datetime.date(value, 1, 1)
-                        if col not in ["estimate_number", "year_of_estimate"] and value not in ("", None, 0, 0.0):
+                        # year_of_estimate is now a string financial year, no conversion needed
+                        form_data[col] = value
+                        if col not in ["estimate_number", "year_of_estimate", "name_of_project"] and value not in ("", None, 0, 0.0):
                             filled_fields += 1
 
                     submitted = st.form_submit_button("💾 Save Section", use_container_width=True, type="primary")
@@ -1267,7 +1323,7 @@ if not is_admin:
 
                     # Explicit UI level validation for Estimate fields (Contract Management only)
                     if module_name == "contract_management":
-                        for req_col in ["estimate_number", "year_of_estimate"]:
+                        for req_col in ["estimate_number", "year_of_estimate", "name_of_project"]:
                             if req_col in form_data:
                                 val = form_data.get(req_col)
                                 if val in (None, "", 0, 0.0):
@@ -1281,13 +1337,11 @@ if not is_admin:
 
                     if is_new_app:
                         try:
-                            # Convert year integer to date for DB compatibility
-                            db_est_yr = datetime.date(year_of_estimate, 1, 1) if isinstance(year_of_estimate, int) else year_of_estimate
                             target_master_id = create_master_submission(
                                 user_id, module_name, tables, 
                                 status='DRAFT',
                                 estimate_number=estimate_number,
-                                year_of_estimate=db_est_yr
+                                year_of_estimate=year_of_estimate
                             )
                         except ValueError as ve:
                             st.error(f"🚫 **Duplicate Application Found**\n{str(ve)}")
@@ -1325,20 +1379,12 @@ if not is_admin:
 
                         # Locked estimate fields — force session_state so widget always
                         # shows the live value even without a manual page reload
-                        if col in ["estimate_number", "year_of_estimate"]:
-                            value = estimate_number if col == "estimate_number" else year_of_estimate
+                        if col in ["estimate_number", "year_of_estimate", "name_of_project"]:
+                            value = estimate_number if col == "estimate_number" else (name_of_project if col == "name_of_project" else year_of_estimate)
                             display_key = f"display_{table}_{col}"
                             
                             if value is None:
                                 disp_val = ""
-                            elif col == "year_of_estimate":
-                                # Extract only the year part if it's a date or a long string
-                                if hasattr(value, 'year'):
-                                    disp_val = str(value.year)
-                                elif isinstance(value, str) and "-" in value:
-                                    disp_val = value.split("-")[0]
-                                else:
-                                    disp_val = str(value)
                             else:
                                 disp_val = str(value)
 
@@ -1419,19 +1465,19 @@ if not is_admin:
                             form_data["estimate_number"] = estimate_number
                         if "year_of_estimate" in table_col_names:
                             form_data["year_of_estimate"] = year_of_estimate
+                        if "name_of_project" in table_col_names:
+                            form_data["name_of_project"] = name_of_project
                         # Atomic master creation and save
                         target_master_id = st.session_state.master_id
                         is_new_app = (target_master_id is None)
 
                         if is_new_app:
                             try:
-                                # Convert year integer to date for DB compatibility
-                                db_est_yr = datetime.date(year_of_estimate, 1, 1) if isinstance(year_of_estimate, int) else year_of_estimate
                                 target_master_id = create_master_submission(
                                     user_id, module_name, tables, 
                                     status='DRAFT',
                                     estimate_number=estimate_number,
-                                    year_of_estimate=db_est_yr
+                                    year_of_estimate=year_of_estimate
                                 )
                             except Exception as e:
                                 err_str = str(e).lower()
