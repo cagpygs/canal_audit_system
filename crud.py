@@ -215,6 +215,92 @@ def save_draft_record(table, data, user_id, master_id=None):
             release_connection(conn)
 
 
+def update_master_attachments(master_id, estimate_path=None, sar_path=None):
+    """Updates the file attachment paths for a master submission."""
+    master_id = int(master_id)
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        updates = []
+        params = []
+        
+        if estimate_path is not None:
+            updates.append("estimate_attachment = %s")
+            params.append(estimate_path)
+        
+        if sar_path is not None:
+            updates.append("sar_attachment = %s")
+            params.append(sar_path)
+            
+        if not updates:
+            return True
+            
+        params.append(master_id)
+        query = f"UPDATE master_submission SET {', '.join(updates)} WHERE id = %s"
+        
+        cur.execute(query, params)
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error updating attachments: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
+def update_master_submission(master_id, estimate_number=None, year_of_estimate=None, name_of_project=None):
+    """Updates the core metadata of a master submission."""
+    master_id = int(master_id)
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        updates = []
+        params = []
+        
+        if estimate_number is not None:
+            updates.append("estimate_number = %s")
+            params.append(estimate_number)
+            
+        if year_of_estimate is not None:
+            updates.append("year_of_estimate = %s")
+            params.append(year_of_estimate)
+            
+        if name_of_project is not None:
+            updates.append("name_of_project = %s")
+            params.append(name_of_project)
+            
+        if not updates:
+            return True
+            
+        params.append(master_id)
+        query = f"UPDATE master_submission SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s"
+        
+        cur.execute(query, params)
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error updating master metadata: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
 # ================= CREATE MASTER SUBMISSION =================
 def create_master_submission(user_id, module, tables, status='COMPLETED', estimate_number=None, year_of_estimate=None, name_of_project=None):
     user_id = int(user_id)
@@ -421,6 +507,33 @@ def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None, name_
         st.error(f"Error fetching applications for this estimate ({module or 'global'}): {e}")
         return []
 
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
+def get_master_submission(master_id):
+    """Retrieves a single record from master_submission by ID."""
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.*, u.username as created_by_user
+            FROM master_submission m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.id = %s
+        """, (master_id,))
+        
+        columns = [desc[0] for desc in cur.description]
+        row = cur.fetchone()
+        return dict(zip(columns, row)) if row else None
+    except Exception as e:
+        st.error(f"Error getting master submission: {e}")
+        return None
     finally:
         if cur:
             cur.close()
@@ -639,20 +752,8 @@ def get_user_draft_summaries(user_id, all_modules):
         columns = [desc[0] for desc in cur.description]
         records = [dict(zip(columns, row)) for row in cur.fetchall()]
         
-        # Filter out empty drafts (those with zero progress)
-        final_records = []
-        for rec in records:
-            m_id = rec["id"]
-            m_key = rec.get("module")
-            if m_key and m_key in all_modules:
-                m_tables = all_modules[m_key]
-                _, completed, _ = get_user_progress(user_id, m_tables, master_id=m_id)
-                if completed > 0:
-                    final_records.append(rec)
-            else:
-                # If module info is missing, we keep it to be safe or skip?
-                # For now, let's keep it if we can't verify it's empty.
-                final_records.append(rec)
+        # Include all drafts, regardless of progress
+        final_records = [rec for rec in records]
         
         return final_records
     except Exception as e:

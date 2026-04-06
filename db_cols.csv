@@ -1,0 +1,6 @@
+table_name,column_name
+contract_management_budget_summary,name_of_project
+master_submission,name_of_work
+contract_management_contract_master,name_of_project
+contract_management_admin_financial_sanction,name_of_project
+contract_management_tender_award_contract,name_of_project

@@ -356,6 +356,38 @@ def show_submission_details(sub, mode="user"):
         st.dataframe(df_section, use_container_width=True)
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
+    # ---- ATTACHMENTS (Admin/User View) ----
+    # attachments are in the master_submission table (sub is the master record)
+    est_path = sub.get("estimate_attachment")
+    sar_path = sub.get("sar_attachment")
+    
+    if est_path or sar_path:
+        st.markdown("#### 📂 Attached Documents")
+        col_at1, col_at2 = st.columns(2)
+        
+        if est_path and os.path.exists(est_path):
+            with col_at1:
+                with open(est_path, "rb") as f:
+                    st.download_button(
+                        label="📑 Download Estimate",
+                        data=f,
+                        file_name=os.path.basename(est_path),
+                        key=f"dl_est_{sub['id']}",
+                        use_container_width=True
+                    )
+        
+        if sar_path and os.path.exists(sar_path):
+            with col_at2:
+                with open(sar_path, "rb") as f:
+                    st.download_button(
+                        label="📑 Download SAR",
+                        data=f,
+                        file_name=os.path.basename(sar_path),
+                        key=f"dl_sar_{sub['id']}",
+                        use_container_width=True
+                    )
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
     st.markdown("---")
 
     # ---- Actions based on mode ----
@@ -379,6 +411,10 @@ def show_submission_details(sub, mode="user"):
     
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     if st.button("✖️ Close", key=f"close_sub_details_{sub.get('id', 'def')}", use_container_width=True):
+        if "sub_to_view" in st.session_state:
+             del st.session_state.sub_to_view
+        if "sub_view_mode" in st.session_state:
+             del st.session_state.sub_view_mode
         st.rerun()
 
 @st.dialog("📂 Applications for Estimate", width="large", dismissible=False)
@@ -400,16 +436,13 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
                 st.session_state.trigger_new_app_from_modal = True
                 st.session_state.initial_estimate_number = est_no
                 st.session_state.initial_year_of_estimate = est_yr
-                # Check if available in group submissions
+                # Find the latest available project name for pre-filling
                 submissions = get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None)
                 if submissions:
-                    try:
-                        s_data = get_full_submission_data(submissions[0]['id'])
-                        first_table = list(s_data.keys())[0] if s_data else None
-                        if first_table and 'name_of_project' in s_data[first_table].columns:
-                            st.session_state.initial_name_of_project = s_data[first_table].iloc[0]['name_of_project']
-                    except Exception:
-                        pass
+                     for sub in submissions:
+                         if sub.get('name_of_project'):
+                             st.session_state.initial_name_of_project = sub.get('name_of_project')
+                             break
                 st.rerun()
         st.markdown("<div style='height:15px'></div>", unsafe_allow_html=True)
     
@@ -420,10 +453,9 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
     
     if not submissions:
         st.info("No applications found for this estimate.")
-    
     else:
         # Header for the applications list
-        h1, h2, h3, h4, r_spacer, h6 = st.columns([0.8, 1.8, 1.2, 1.2, 1.0, 1.2])
+        h1, h2, h3, h4, r_spacer, h6 = st.columns([0.8, 1.8, 1.2, 1.2, 0.5, 2.0])
         h1.markdown("**S.No**")
         h2.markdown("**User**")
         h3.markdown("**Date**")
@@ -432,7 +464,7 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
         st.markdown("<hr style='margin:0; margin-bottom:10px;'>", unsafe_allow_html=True)
 
         for i, s in enumerate(submissions, 1):
-            r1, r2, r3, r4, r_spacer2, r6 = st.columns([0.8, 1.8, 1.2, 1.2, 1.0, 1.2])
+            r1, r2, r3, r4, r_spacer2, r6 = st.columns([0.8, 1.8, 1.2, 1.2, 0.5, 2.0])
             status = s.get("status", "DRAFT")
             status_color = "#3b82f6" if status == "DRAFT" else "#10b981"
             
@@ -444,7 +476,18 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
                 st.write(fmt_dt(s.get("created_at")))
             with r4:
                 st.markdown(f'<span style="background:{status_color}22; color:{status_color}; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600;">{status}</span>', unsafe_allow_html=True)
-                
+                # Add explicit file status
+                if status == "COMPLETED":
+                    count = 0
+                    if s.get("estimate_attachment"): count += 1
+                    if s.get("sar_attachment"): count += 1
+                    
+                    if count == 0:
+                        st.markdown("<div style='margin-top:5px; font-size:11px; font-weight:600; color:#ef4444;'>❌ Missing Files</div>", unsafe_allow_html=True)
+                    elif count == 1:
+                        st.markdown("<div style='margin-top:5px; font-size:11px; font-weight:600; color:#f59e0b;'>⚠️ 1/2 Uploaded</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<div style='margin-top:5px; font-size:11px; font-weight:600; color:#10b981;'>✅ Both Uploaded</div>", unsafe_allow_html=True)
             with r6:
                 if status == "DRAFT" and not is_admin_user:
                     if st.button("📝 Resume", key=f"btn_group_res_{s['id']}", use_container_width=True):
@@ -452,19 +495,83 @@ def show_estimate_group_dialog(est_no, est_yr, user_id=None, module=None):
                         st.session_state.master_id = s["id"]
                         st.session_state.current_view = s.get("module")
                         st.rerun()
-
                 else:
-                    # View button for completed or drafts (if admin)
-                    if st.button("🔍 View", key=f"btn_group_view_{s['id']}", use_container_width=True):
-                        clear_module_state(s.get("module"))
-                        st.session_state.sub_to_view = s
-                        st.session_state.sub_view_mode = "admin" if is_admin_user else "user"
-                        st.rerun()
+                    v1, v2 = st.columns(2)
+                    with v1:
+                        if st.button("🔍 View", key=f"btn_group_view_{s['id']}", use_container_width=True):
+                             st.session_state.sub_to_view = s
+                             st.session_state.sub_view_mode = "admin" if is_admin_user else "user"
+                             st.rerun()
+                    with v2:
+                        if status == "COMPLETED":
+                             if st.button("📤 Up", key=f"btn_group_up_{s['id']}", use_container_width=True, help="Upload Documents"):
+                                  st.session_state.show_up_id = s['id']
+                                  st.rerun()
 
+        # ---- INLINE UPLOADER FOR "LATER UPLOAD" ----
+        if st.session_state.get("show_up_id"):
+            up_id = st.session_state.show_up_id
+            st.markdown("---")
+            st.markdown(f"#### 📤 Upload Documents for ID: `{up_id}`")
+            
+            m_info = get_master_submission(up_id)
+            f_data = get_full_submission_data(up_id)
+            m_key = m_info.get("module")
+            m_tables = all_modules.get(m_key, [])
+            first_t = m_tables[0] if m_tables else None
+            sub_d = f_data.get(first_t)
+            
+            def clean_n(s): return "".join([c if c.isalnum() or c in ('-', '_') else '_' for c in str(s)])
+            if sub_d is not None and not sub_d.empty:
+                t_row = sub_d.iloc[0]
+                e_no = clean_n(t_row.get("estimate_number", m_info.get("estimate_number", "NA")))
+                p_nm = clean_n(t_row.get("name_of_project", m_info.get("name_of_project", "NA")))
+                e_yr = clean_n(t_row.get("year_of_estimate", m_info.get("year_of_estimate", "NA")))
+            else:
+                e_no = clean_n(m_info.get("estimate_number", "NA"))
+                p_nm = clean_n(m_info.get("name_of_project", "NA"))
+                e_yr = clean_n(m_info.get("year_of_estimate", "NA"))
 
+            c1, c2 = st.columns(2)
+            with c1:
+                # Show current status if exists
+                curr_est = m_info.get("estimate_attachment")
+                if curr_est and os.path.exists(curr_est):
+                    st.success(f"✅ **Estimate File on Record:** `{os.path.basename(curr_est)}`")
+                
+                est_f = st.file_uploader("📑 Upload / Replace Estimate", type=['pdf', 'docx', 'xlsx', 'jpg', 'png'], key=f"dlg_up_est_{up_id}")
+                if est_f:
+                    f_ext = os.path.splitext(est_f.name)[1]
+                    s_path = os.path.join("uploads", f"Estimate_{e_no}_{p_nm}_{e_yr}{f_ext}")
+                    with open(s_path, "wb") as f:
+                        f.write(est_f.getbuffer())
+                    update_master_attachments(up_id, estimate_path=s_path)
+                    st.success("Estimate uploaded successfully!")
+                    st.rerun()
+            with c2:
+                # Show current status if exists
+                curr_sar = m_info.get("sar_attachment")
+                if curr_sar and os.path.exists(curr_sar):
+                    st.success(f"✅ **SAR File on Record:** `{os.path.basename(curr_sar)}`")
+
+                sar_f = st.file_uploader("📑 Upload / Replace SAR", type=['pdf', 'docx', 'xlsx', 'jpg', 'png'], key=f"dlg_up_sar_{up_id}")
+                if sar_f:
+                    f_ext = os.path.splitext(sar_f.name)[1]
+                    s_path = os.path.join("uploads", f"SAR_{e_no}_{p_nm}_{e_yr}{f_ext}")
+                    with open(s_path, "wb") as f:
+                        f.write(sar_f.getbuffer())
+                    update_master_attachments(up_id, sar_path=s_path)
+                    st.success("SAR uploaded successfully!")
+                    st.rerun()
+            
+            if st.button("Close Upload Panel", key="close_dlg_up"):
+                del st.session_state.show_up_id
+                st.rerun()
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     if st.button("✖️ Close", key=f"close_est_group_{est_no}", use_container_width=True):
+        if "active_est_dlg" in st.session_state:
+             del st.session_state.active_est_dlg
         st.rerun()
 
 @st.dialog("📋 Application Already Exists", width="medium", dismissible=False)
@@ -486,6 +593,12 @@ def show_duplicate_submission_modal():
     
     if status == "DRAFT":
         st.warning("⚠️ **Existing Application with same Estimate Number and Year Found**")
+        if st.button("📝 Resume Existing Draft", type="primary", use_container_width=True):
+            clear_module_state(m_key)
+            st.session_state.master_id = sub["id"]
+            st.session_state.current_view = m_key
+            del st.session_state["active_modal_data"]
+            st.rerun()
     else:
         st.error("🚫 **Submission Already Completed**\nThis estimate has already been submitted and cannot be modified or duplicated.")
         if st.button("🔍 View Submission Details", type="primary", use_container_width=True):
@@ -882,7 +995,17 @@ if not is_admin:
                     st.session_state.master_id = None
                     st.session_state.current_view = sel_m_key
             
-            # --- Module Selection & Estimate Inputs ---
+        # --- GLOBAL DIALOG HANDLERS (Ensures modals persist across reruns) ---
+        if st.session_state.get("active_est_dlg"):
+            dlg = st.session_state.active_est_dlg
+            show_estimate_group_dialog(dlg['est_no'], dlg['est_yr'], user_id=dlg.get('user_id'), module=dlg.get('module'))
+
+        if st.session_state.get("sub_to_view"):
+            sub_val = st.session_state.sub_to_view
+            m_val = st.session_state.get("sub_view_mode", "user")
+            show_submission_details(sub_val, mode=m_val)
+
+        # --- Module Selection & Estimate Inputs ---
             if not is_admin:
                 c_sel, c_btn = st.columns([5, 1])
                 with c_sel:
@@ -1024,13 +1147,25 @@ if not is_admin:
                     with r2:
                         if est_no and est_no != "---":
                             if st.button(f"**{est_no}**", key=f"btn_grp_{i}_{est_no}", use_container_width=True):
-                                show_estimate_group_dialog(est_no, est_yr, user_id=user_id, module=group.get("module"))
+                                st.session_state.active_est_dlg = {
+                                    'est_no': est_no, 
+                                    'est_yr': est_yr, 
+                                    'user_id': user_id, 
+                                    'module': group.get("module")
+                                }
+                                st.rerun()
 
                         else:
                             # If no estimate, show module name and link to dialog specifically for this item
                             mod_name = module_display_map.get(group.get("module"), "Draft")
                             if st.button(f"**{mod_name} (Draft)**", key=f"btn_grp_{i}_{est_no}", use_container_width=True):
-                                show_estimate_group_dialog(est_no, est_yr, user_id=user_id, module=group.get("module"))
+                                st.session_state.active_est_dlg = {
+                                    'est_no': est_no, 
+                                    'est_yr': est_yr, 
+                                    'user_id': user_id, 
+                                    'module': group.get("module")
+                                }
+                                st.rerun()
 
                     
                     with r3:
@@ -1138,14 +1273,33 @@ if not is_admin:
     estimate_number = None
     year_of_estimate = None
     name_of_project = None
+
     if first_table_draft:
         estimate_number = first_table_draft.get("estimate_number")
         year_of_estimate = first_table_draft.get("year_of_estimate")
         name_of_project = first_table_draft.get("name_of_project")
-    elif module_name == "contract_management":
-        # Check for initial values from Main page
+    elif st.session_state.get("master_id"):
+        # Fetch from master record if resuming a fresh draft
+        master_rec = get_master_submission(st.session_state.master_id)
+        if master_rec:
+            estimate_number = master_rec.get("estimate_number")
+            year_of_estimate = master_rec.get("year_of_estimate")
+            name_of_project = master_rec.get("name_of_project")
+            
+            # If current master has no project name, search for a non-blank one in this estimate group
+            if not name_of_project:
+                alt_subs = get_submissions_by_estimate(estimate_number, year_of_estimate)
+                for alt_s in alt_subs:
+                    if alt_s.get("name_of_project"):
+                        name_of_project = alt_s.get("name_of_project")
+                        break
+    
+    # Fallback to initial session values for fresh starts
+    if not estimate_number:
         estimate_number = st.session_state.get("initial_estimate_number")
+    if not year_of_estimate:
         year_of_estimate = st.session_state.get("initial_year_of_estimate")
+    if not name_of_project:
         name_of_project = st.session_state.get("initial_name_of_project")
 
     for i, table in enumerate(tables):
@@ -1219,19 +1373,14 @@ if not is_admin:
                         else:
                             st.session_state.setdefault(key, "")
                         
-                        # High-priority pre-fill for Master Estimate fields (Tab 1 fresh start)
+                        # High-priority pre-fill for Master Estimate fields (Tab 1 fresh start or Resume Empty Draft)
                         if is_master_form and not draft:
-                            if col == "estimate_number" and st.session_state.get("initial_estimate_number"):
-                                st.session_state[key] = str(st.session_state.initial_estimate_number)
-                            elif col == "year_of_estimate" and st.session_state.get("initial_year_of_estimate"):
-                                val = st.session_state.initial_year_of_estimate
-                                # Convert to string for text fields, keep as int for selectbox/number fields
-                                if dtype in ("integer", "bigint", "smallint", "date"):
-                                    st.session_state[key] = val
-                                else:
-                                    st.session_state[key] = str(val)
-                            elif col == "name_of_project" and st.session_state.get("initial_name_of_project"):
-                                st.session_state[key] = str(st.session_state.initial_name_of_project)
+                            if col == "estimate_number" and estimate_number:
+                                st.session_state[key] = str(estimate_number)
+                            elif col == "year_of_estimate" and year_of_estimate:
+                                st.session_state[key] = year_of_estimate
+                            elif col == "name_of_project" and name_of_project:
+                                st.session_state[key] = str(name_of_project)
 
                 st.session_state[f"{table}_initialized"] = True
 
@@ -1353,6 +1502,14 @@ if not is_admin:
                     try:
 
                         save_draft_record(table, form_data, user_id, master_id=target_master_id)
+                        # Sync master metadata if this is the first table
+                        if table == tables[0]:
+                            update_master_submission(
+                                target_master_id,
+                                estimate_number=form_data.get("estimate_number"),
+                                year_of_estimate=form_data.get("year_of_estimate"),
+                                name_of_project=form_data.get("name_of_project")
+                            )
                         st.session_state.master_id = target_master_id
                         st.success("✅ Section saved successfully!")
                         st.toast("📝 Application saved to drafts.")
@@ -1489,6 +1646,14 @@ if not is_admin:
                         
                         try:
                             save_draft_record(table, form_data, user_id, master_id=target_master_id)
+                            # Sync master metadata if this is the first table
+                            if table == tables[0]:
+                                update_master_submission(
+                                    target_master_id,
+                                    estimate_number=form_data.get("estimate_number"),
+                                    year_of_estimate=form_data.get("year_of_estimate"),
+                                    name_of_project=form_data.get("name_of_project")
+                                )
                             st.session_state.master_id = target_master_id
                             st.success("✅ Section saved successfully!")
                             st.toast("📝 Application saved to drafts.")
@@ -1524,6 +1689,97 @@ if not is_admin:
             clean_name = sec.replace(prefix, "").replace("_", " ").title()
             st.markdown(f"&nbsp;&nbsp;&nbsp;**{i}.** {clean_name}")
     else:
+        # ---- FILE UPLOADS ----
+        st.markdown("""
+        <div class="submit-cta" style="background: rgba(255, 193, 7, 0.1); border-left-color: #ffc107;">
+            <h3 style="color: #856404;">📁 Required Attachments</h3>
+            <p>Please upload the mandatory documents below to enable final submission.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col_u1, col_u2 = st.columns(2)
+        
+        m_id = st.session_state.master_id
+        # Fetch current attachments if any (to show status)
+        master_info = get_master_submission(m_id)
+        existing_est = master_info.get("estimate_attachment")
+        existing_sar = master_info.get("sar_attachment")
+
+        with col_u1:
+            if existing_est:
+                st.success(f"✅ Estimate Uploaded: `{os.path.basename(existing_est)}`")
+            est_file = st.file_uploader("📑 Upload Estimate", type=['pdf', 'docx', 'xlsx', 'jpg', 'png'], key="uploader_estimate")
+            if est_file:
+                # Use name + size to detect a fresh upload
+                file_id = f"{est_file.name}_{est_file.size}"
+                if st.session_state.get("last_est_id") != file_id:
+                    # Sanitize and get values from form data for accurate naming
+                    def clean(s): return "".join([c if c.isalnum() or c in ('-', '_') else '_' for c in str(s)])
+                    
+                    # Pull values from actual form submission if available (fallback to master)
+                    full_data = get_full_submission_data(m_id)
+                    first_table = tables[0] if tables else None
+                    sub_data = full_data.get(first_table)
+                    
+                    if sub_data is not None and not sub_data.empty:
+                        target_row = sub_data.iloc[0]
+                        est_no = clean(target_row.get("estimate_number", master_info.get("estimate_number", "NA")))
+                        proj_nm = clean(target_row.get("name_of_project", master_info.get("name_of_project", "NA")))
+                        est_yr = clean(target_row.get("year_of_estimate", master_info.get("year_of_estimate", "NA")))
+                    else:
+                        est_no = clean(master_info.get("estimate_number", "NA"))
+                        proj_nm = clean(master_info.get("name_of_project", "NA"))
+                        est_yr = clean(master_info.get("year_of_estimate", "NA"))
+                    
+                    file_ext = os.path.splitext(est_file.name)[1]
+                    new_name = f"Estimate_{est_no}_{proj_nm}_{est_yr}{file_ext}"
+                    save_path = os.path.join("uploads", new_name)
+                    
+                    with open(save_path, "wb") as f:
+                        f.write(est_file.getbuffer())
+                    
+                    update_master_attachments(m_id, estimate_path=save_path)
+                    st.session_state["last_est_id"] = file_id
+                    st.rerun()
+
+        with col_u2:
+            if existing_sar:
+                st.success(f"✅ SAR Uploaded: `{os.path.basename(existing_sar)}`")
+            sar_file = st.file_uploader("📑 Upload SAR", type=['pdf', 'docx', 'xlsx', 'jpg', 'png'], key="uploader_sar")
+            if sar_file:
+                # Use name + size to detect a fresh upload
+                file_id = f"{sar_file.name}_{sar_file.size}"
+                if st.session_state.get("last_sar_id") != file_id:
+                    # Sanitize and get values from form data for accurate naming
+                    def clean(s): return "".join([c if c.isalnum() or c in ('-', '_') else '_' for c in str(s)])
+                    
+                    # Pull values from actual form submission
+                    full_data = get_full_submission_data(m_id)
+                    first_table = tables[0] if tables else None
+                    sub_data = full_data.get(first_table)
+                    
+                    if sub_data is not None and not sub_data.empty:
+                        target_row = sub_data.iloc[0]
+                        est_no = clean(target_row.get("estimate_number", master_info.get("estimate_number", "NA")))
+                        proj_nm = clean(target_row.get("name_of_project", master_info.get("name_of_project", "NA")))
+                        est_yr = clean(target_row.get("year_of_estimate", master_info.get("year_of_estimate", "NA")))
+                    else:
+                        est_no = clean(master_info.get("estimate_number", "NA"))
+                        proj_nm = clean(master_info.get("name_of_project", "NA"))
+                        est_yr = clean(master_info.get("year_of_estimate", "NA"))
+                    
+                    file_ext = os.path.splitext(sar_file.name)[1]
+                    new_name = f"SAR_{est_no}_{proj_nm}_{est_yr}{file_ext}"
+                    save_path = os.path.join("uploads", new_name)
+                    
+                    with open(save_path, "wb") as f:
+                        f.write(sar_file.getbuffer())
+                    
+                    update_master_attachments(m_id, sar_path=save_path)
+                    st.session_state["last_sar_id"] = file_id
+                    st.rerun()
+
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         if st.button("🚀 Submit My Complete Application", use_container_width=True, type="primary"):
             # Simply update status from DRAFT to COMPLETED
             success = update_master_status(st.session_state.master_id, 'COMPLETED')
@@ -1531,12 +1787,10 @@ if not is_admin:
                 # Mark all associated draft rows as non-draft
                 set_drafts_to_final(st.session_state.master_id, tables)
                 st.balloons()
-                st.success("🎉 Application submitted successfully!")
+                st.success("🎉 Application Submitted Successfully!")
                 st.session_state.master_id = None
                 st.session_state.current_view = "Main"
                 st.rerun()
-            else:
-                st.error("Failed to submit. Please try again.")
 
 
 # =====================================================
@@ -1548,14 +1802,8 @@ if is_admin:
     if "status_filter" not in st.session_state:
         st.session_state.status_filter = "ALL"
 
-    # --- TRIGGER SUBMISSION DETAILS FROM MODAL ---
-    if st.session_state.get("sub_to_view"):
-        sub_to_view = st.session_state.get("sub_to_view")
-        mode = st.session_state.get("sub_view_mode", "admin")
-        del st.session_state["sub_to_view"]
-        if "sub_view_mode" in st.session_state:
-            del st.session_state["sub_view_mode"]
-        show_submission_details(sub_to_view, mode=mode)
+    # --- GLOBAL DIALOG HANDLERS MOVED TO TOP FOR CONSISTENCY ---
+    # The sub_to_view handler that was here is now handled globally at line 640+
 
     st.markdown(f"""<div class="hero-banner" style="background: linear-gradient(135deg, #4338ca, #312e81); margin-top: 0px;"><h1>🛡️ Admin Review Panel</h1><p style="margin:0;">Review submitted applications, manage accounts, and export reports.</p></div>""", unsafe_allow_html=True)
 

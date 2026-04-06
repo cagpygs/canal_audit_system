@@ -1,0 +1,8 @@
+table_name,data_type
+master_submission,date
+contract_management_budget_summary,text
+contract_management_tender_award_contract,text
+contract_management_admin_financial_sanction,text
+contract_management_technical_sanction,text
+contract_management_payments_recoveries,text
+contract_management_contract_master,text
