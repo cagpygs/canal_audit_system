@@ -1,0 +1,80 @@
+{
+  "run_tag": "LT20260409005452",
+  "module": "contract_management",
+  "tables_to_fill": [
+    "contract_management_admin_financial_sanction"
+  ],
+  "virtual_users": 500,
+  "concurrency": 200,
+  "success_count": 85,
+  "failure_count": 415,
+  "success_rate_pct": 17.0,
+  "total_duration_s": 27.45,
+  "throughput_flows_per_s": 18.215,
+  "latency_ms": {
+    "min": 6948.63,
+    "p50": 8827.86,
+    "p95": 13383.17,
+    "p99": 13702.4,
+    "max": 15117.09,
+    "mean": 9211.11
+  },
+  "user_reuse": true,
+  "available_operator_users": 10,
+  "temp_users_created": 0,
+  "set_status": "DRAFT",
+  "fields_per_section": 8,
+  "year_of_estimate": "2026-27",
+  "sample_errors": [
+    {
+      "worker_index": 89,
+      "user_id": 21,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 14,
+      "user_id": 9,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 15,
+      "user_id": 11,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 16,
+      "user_id": 15,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 17,
+      "user_id": 19,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 90,
+      "user_id": 2,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 18,
+      "user_id": 20,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 19,
+      "user_id": 21,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 20,
+      "user_id": 2,
+      "error": "PoolError: connection pool exhausted"
+    },
+    {
+      "worker_index": 91,
+      "user_id": 3,
+      "error": "PoolError: connection pool exhausted"
+    }
+  ]
+}

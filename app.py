@@ -1,10 +1,47 @@
 from auth import login
-from crud import *
+from crud import (
+    can_user_edit,
+    create_master_submission,
+    create_user,
+    delete_unattached_drafts,
+    export_master_submission_pdf,
+    get_all_tables,
+    get_all_users_admin,
+    get_full_draft_data,
+    get_full_submission_data,
+    get_incomplete_forms,
+    get_master_submission,
+    get_submissions_by_estimate,
+    get_table_columns,
+    get_user_by_id,
+    get_user_draft,
+    get_user_draft_summaries,
+    get_user_master_status_counts,
+    get_user_master_submissions,
+    get_user_master_submissions_admin,
+    get_user_progress,
+    save_draft_record,
+    set_drafts_to_final,
+    toggle_user_status,
+    update_master_attachments,
+    update_master_status,
+    update_master_submission,
+    update_user_modules,
+)
 from streamlit_cookies_manager.encrypted_cookie_manager import EncryptedCookieManager
 import datetime
 import base64
+import html
 import os
 import streamlit as st
+
+from error_utils import log_exception, report_error
+
+st.set_page_config(
+    page_title="CAG Audit Management System",
+    page_icon="🏛️",
+    layout="wide",
+)
 
 
 # =====================================================
@@ -25,20 +62,32 @@ else:
 # =====================================================
 # ================= COOKIES / CONFIG ==================
 # =====================================================
+def _get_runtime_secret(name):
+    value = os.getenv(name)
+    if value not in (None, ""):
+        return value
+    try:
+        secret_value = st.secrets.get(name)
+    except Exception:
+        secret_value = None
+    if secret_value not in (None, ""):
+        return str(secret_value)
+    return None
+
+
+cookie_password = _get_runtime_secret("COOKIE_PASSWORD") or _get_runtime_secret("COOKIE_SECRET")
+if not cookie_password or len(cookie_password) < 16:
+    st.error("Missing secure cookie secret. Set COOKIE_PASSWORD (minimum 16 chars).")
+    st.stop()
+
 cookies = EncryptedCookieManager(
     prefix="canal_app",
-    password="super-secret-password",
+    password=cookie_password,
 )
 if not cookies.ready():
     st.stop()
 
 money_keywords = ["expenditure", "amount", "cost", "payment", "value", "budget"]
-
-st.set_page_config(
-    page_title="CAG Audit Management System",
-    page_icon="🏛️",
-    layout="wide",
-)
 
 # =====================================================
 # ====  URL QUERY PARAM HANDLER (global, top) =========
@@ -56,8 +105,8 @@ try:
         st.session_state.dashboard_page = 1
         st.query_params.clear()
         st.rerun()
-except Exception:
-    pass
+except Exception as e:
+    log_exception("app.query_param_handler", e)
 
 # Hidden developer info
 st.markdown("""
@@ -151,8 +200,8 @@ if st.session_state.get("logged_in") and st.session_state.get("user_id"):
             st.session_state.logged_in = False
             st.session_state.user_id = None
             st.rerun()
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("app.live_permission_sync", e)
 
 
 # =====================================================
@@ -229,7 +278,7 @@ if not st.session_state.logged_in or not st.session_state.user_id:
 # =====================================================
 user_id   = st.session_state.get("user_id")
 is_admin  = st.session_state.role == "admin"
-role_label = "Administrator" if is_admin else "Engineer of Irrigation Department"
+role_label = "Administrator" if is_admin else "Engineer"
 
 # =====================================================
 # ================= TOP NAVIGATION BAR ================
@@ -247,7 +296,7 @@ st.markdown(f"""
     </div>
     <div class="nav-links-left">
         <a href="./?nav=Main" target="_self"
-           class="nav-item-minimal {'active' if st.session_state.get('current_view','Main')=='Main' else ''}">
+           class="nav-item-minimal">
            Dashboard
         </a>
         <a href="./?nav=NewApp" target="_self" class="nav-item-minimal">Create New Estimate</a>
@@ -302,7 +351,7 @@ def fmt_dt(value):
             return "—"
         try:
             value = datetime.datetime.fromisoformat(value)
-        except Exception:
+        except ValueError:
             return value[:16]
     if isinstance(value, datetime.datetime):
         return value.strftime("%d %b %Y, %I:%M %p")
@@ -311,15 +360,22 @@ def fmt_dt(value):
     return str(value)[:16]
 
 
+def esc_html(value):
+    return html.escape("" if value is None else str(value))
+
+
 @st.dialog("📋 Submission Details", width="large", dismissible=False)
 def show_submission_details(sub):
     module_key   = sub.get("module") or ""
     module_label = module_key.replace("_", " ").title()
+    module_label_safe = esc_html(module_label)
     status       = sub["status"]
     is_synthetic_draft = str(sub.get("id", "")).startswith("draft_")
 
     created_at       = sub.get("created_at", "")
     created_by_user  = sub.get("created_by_user") or "Unknown"
+    created_by_user_safe = esc_html(created_by_user)
+    created_at_safe = esc_html(fmt_dt(created_at))
 
     if status == "DRAFT":
         status_color = "#d97706"
@@ -332,7 +388,7 @@ def show_submission_details(sub):
         y_val   = est_yr.year if hasattr(est_yr, 'year') else est_yr
         display_key = f"{est_no} ({y_val})" if est_no != "---" else "---"
         est_html = (f'<div style="font-size:12px; font-weight:600; color:#374151; margin-bottom:4px;">'
-                    f'Estimate: {display_key}</div>')
+                    f'Estimate: {esc_html(display_key)}</div>')
     else:
         est_html = ""
 
@@ -340,13 +396,13 @@ def show_submission_details(sub):
     <div style="padding:14px 18px; border-radius:8px; background:#f8f9fc; margin-bottom:18px;
                 border-left:4px solid {status_color}; border:1px solid #e5e8ef;
                 border-left:4px solid {status_color};">
-        <div style="font-weight:700; font-size:14px; color:#1a3a6b; margin-bottom:4px;">{module_label}</div>
+        <div style="font-weight:700; font-size:14px; color:#1a3a6b; margin-bottom:4px;">{module_label_safe}</div>
         {est_html}
         <div style="font-size:12px; color:#6b7280; margin-bottom:2px;">
-            <b>{"Submitted By" if status != "DRAFT" else "Created By"}:</b> {created_by_user}
+            <b>{"Submitted By" if status != "DRAFT" else "Created By"}:</b> {created_by_user_safe}
         </div>
         <div style="font-size:12px; color:#6b7280;">
-            <b>{"Submitted on" if status != "DRAFT" else "Last Updated"}:</b> {fmt_dt(created_at)}
+            <b>{"Submitted on" if status != "DRAFT" else "Last Updated"}:</b> {created_at_safe}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -652,7 +708,7 @@ def show_new_application_dialog():
             st.session_state.current_view = selected_m
             st.rerun()
         except Exception as e:
-            st.error(f"❌ Error starting application: {e}")
+            report_error("❌ Error starting application.", e, "app.show_new_application_dialog")
             return
 
     if st.button("✖️ Close", use_container_width=True):
@@ -839,7 +895,7 @@ if not is_admin:
     # =========================================================
     if selected_module == "Main":
 
-        username_display = st.session_state.username or "Officer"
+        username_display = esc_html(st.session_state.username or "Officer")
         st.markdown(f"""
         <div class="welcome-hero">
             <div style="font-size:11px; font-weight:700; color:#9ca3af; letter-spacing:1.1px;
@@ -1116,15 +1172,15 @@ if not is_admin:
                         val = draft[col]
                         if dtype in ("integer","bigint","smallint"):
                             try: val = int(val)
-                            except: val = 0
+                            except (TypeError, ValueError): val = 0
                         elif dtype in ("numeric","double precision","real"):
                             try: val = float(val)
-                            except: val = 0.0
+                            except (TypeError, ValueError): val = 0.0
                         elif dtype == "date":
                             if isinstance(val, datetime.datetime): val = val.date()
                             elif isinstance(val, str):
                                 try: val = datetime.date.fromisoformat(val[:10])
-                                except: val = None
+                                except (TypeError, ValueError): val = None
                             if col == "year_of_estimate" and val:
                                 val = val.year if hasattr(val,'year') else val
                         else:
@@ -1133,7 +1189,8 @@ if not is_admin:
                             try:
                                 y   = int(str(val).split("-")[0])
                                 val = f"{y}-{str(y+1)[2:]}"
-                            except: pass
+                            except (TypeError, ValueError):
+                                pass
                         st.session_state[key] = val
                     else:
                         if dtype in ("integer","bigint","smallint"):
@@ -1231,7 +1288,7 @@ if not is_admin:
                             st.error(f"🚫 **Duplicate Application Found:** {str(ve)}")
                             st.stop()
                         except Exception as e:
-                            st.error(f"❌ Failed to create application: {e}")
+                            report_error("❌ Failed to create application.", e, "app.save_first_section.create")
                             st.stop()
 
                     try:
@@ -1246,7 +1303,7 @@ if not is_admin:
                         st.toast("📝 Application saved to drafts.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Failed to save section: {e}")
+                        report_error("❌ Failed to save section.", e, "app.save_first_section")
                         st.stop()
 
             # ---- OTHER TABS ----
@@ -1326,7 +1383,7 @@ if not is_admin:
                                 if "unique_estimate" in err or "duplicate key" in err:
                                     st.error(f"⚠️ An application with Estimate **{estimate_number}** already exists.")
                                 else:
-                                    st.error(f"❌ Failed to create application: {e}")
+                                    report_error("❌ Failed to create application.", e, "app.save_other_section.create")
                                 st.stop()
 
                         try:
@@ -1341,7 +1398,7 @@ if not is_admin:
                             st.toast("📝 Application saved to drafts.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Failed to save section: {e}")
+                            report_error("❌ Failed to save section.", e, "app.save_other_section")
                             st.stop()
 
     # =========================================================
@@ -1521,6 +1578,7 @@ if is_admin:
                 urole       = row_usr['role']
                 is_active   = row_usr.get('is_active', True)
                 allowed_str = row_usr.get('allowed_modules','')
+                safe_uname = esc_html(uname)
                 current_allowed = allowed_str.split(',') if allowed_str else []
                 s_no = start_idx + i + 1
 
@@ -1528,7 +1586,7 @@ if is_admin:
                 with cc1:
                     st.markdown(f"<div style='padding-top:10px;'>{s_no}</div>", unsafe_allow_html=True)
                 with cc2:
-                    st.markdown(f"<div style='padding-top:10px;'><b>{uname}</b></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='padding-top:10px;'><b>{safe_uname}</b></div>", unsafe_allow_html=True)
                 with cc3:
                     st.markdown(f"<div style='padding-top:10px;'>{'Administrator' if urole=='admin' else 'Operator'}</div>",
                                 unsafe_allow_html=True)
@@ -1643,10 +1701,11 @@ if is_admin:
                 else:
                     submitted, drafts = get_user_master_status_counts(selected_user_id, all_modules)
                     total = submitted + drafts
-                    st.markdown(f"#### 📊 Submission Overview — {selected_user}")
+                    selected_user_safe = esc_html(selected_user)
+                    st.markdown(f"#### 📊 Submission Overview — {selected_user_safe}")
                     if total == 0:
                         st.markdown(f"""<div class="empty-state"><div class="empty-icon">🔍</div>
-                            <p>No activity found for <b>{selected_user}</b>.</p></div>""",
+                            <p>No activity found for <b>{selected_user_safe}</b>.</p></div>""",
                             unsafe_allow_html=True)
                     else:
                         render_metric_cards(total, submitted, drafts,

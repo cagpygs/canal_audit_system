@@ -7,8 +7,121 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
+import hashlib
+import hmac
 import io
 import os
+import re
+import secrets
+import time
+
+from error_utils import report_error
+
+
+PASSWORD_HASH_PREFIX = "pbkdf2_sha256"
+PASSWORD_HASH_ALGORITHM = "sha256"
+PASSWORD_HASH_ITERATIONS = 260000
+PASSWORD_SALT_BYTES = 16
+TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _read_setting(name, default=None):
+    value = os.getenv(name)
+    if value not in (None, ""):
+        return value
+
+    try:
+        secret_value = st.secrets.get(name)
+    except Exception:
+        secret_value = None
+
+    if secret_value not in (None, ""):
+        return str(secret_value)
+    return default
+
+
+def _read_int_setting(name, default, minimum=None, maximum=None):
+    raw = _read_setting(name, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = int(default)
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _read_float_setting(name, default, minimum=None, maximum=None):
+    raw = _read_setting(name, default)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = float(default)
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _is_pbkdf2_hash(stored_hash):
+    return isinstance(stored_hash, str) and stored_hash.startswith(f"{PASSWORD_HASH_PREFIX}$")
+
+
+def ensure_valid_table_name(table):
+    if not isinstance(table, str) or not TABLE_NAME_PATTERN.fullmatch(table):
+        raise ValueError(f"Invalid table name: {table!r}")
+    return table
+
+
+def hash_password(password):
+    if not isinstance(password, str) or not password:
+        raise ValueError("Password must be a non-empty string.")
+
+    salt = secrets.token_bytes(PASSWORD_SALT_BYTES)
+    digest = hashlib.pbkdf2_hmac(
+        PASSWORD_HASH_ALGORITHM,
+        password.encode("utf-8"),
+        salt,
+        PASSWORD_HASH_ITERATIONS,
+    )
+    return f"{PASSWORD_HASH_PREFIX}${PASSWORD_HASH_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password, stored_hash):
+    if not isinstance(password, str) or not isinstance(stored_hash, str) or not stored_hash:
+        return False
+
+    if _is_pbkdf2_hash(stored_hash):
+        parts = stored_hash.split("$")
+        if len(parts) != 4:
+            return False
+
+        _, iteration_text, salt_hex, digest_hex = parts
+        try:
+            iterations = int(iteration_text)
+            salt = bytes.fromhex(salt_hex)
+            expected_digest = bytes.fromhex(digest_hex)
+        except (TypeError, ValueError):
+            return False
+
+        calculated_digest = hashlib.pbkdf2_hmac(
+            PASSWORD_HASH_ALGORITHM,
+            password.encode("utf-8"),
+            salt,
+            iterations,
+            dklen=len(expected_digest),
+        )
+        return hmac.compare_digest(calculated_digest, expected_digest)
+
+    # Backward compatibility for legacy rows that still store plain text.
+    return hmac.compare_digest(stored_hash, password)
+
+
+def password_needs_upgrade(stored_hash):
+    return not _is_pbkdf2_hash(stored_hash)
 
 
 # ================= DB CONNECTION =================
@@ -16,22 +129,47 @@ import os
 @st.cache_resource
 def get_db_pool():
     # Using ThreadedConnectionPool for multi-threaded Streamlit application
+    db_password = _read_setting("DB_PASSWORD")
+    if not db_password:
+        raise RuntimeError("DB_PASSWORD is not configured. Set it in environment or Streamlit secrets.")
+
+    min_conn = _read_int_setting("DB_POOL_MINCONN", 1, minimum=1)
+    max_conn = _read_int_setting("DB_POOL_MAXCONN", 80, minimum=min_conn)
+
     return pool.ThreadedConnectionPool(
-        1, 50,
-        host=os.getenv("DB_HOST", "localhost"),
-        database=os.getenv("DB_NAME", "Irrigation"),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", "123456"),
-        port=os.getenv("DB_PORT", "5432")
+        min_conn, max_conn,
+        host=_read_setting("DB_HOST", "localhost"),
+        database=_read_setting("DB_NAME", "Irrigation"),
+        user=_read_setting("DB_USER", "postgres"),
+        password=db_password,
+        port=_read_setting("DB_PORT", "5432")
     )
 
 def get_connection():
-    conn = get_db_pool().getconn()
-    conn.autocommit = True
-    return conn
+    wait_timeout = _read_float_setting("DB_POOL_WAIT_TIMEOUT", 30.0, minimum=0.1)
+    wait_poll = _read_float_setting("DB_POOL_WAIT_POLL_INTERVAL", 0.05, minimum=0.01)
+    deadline = time.monotonic() + wait_timeout
+    db_pool = get_db_pool()
+    while True:
+        try:
+            conn = db_pool.getconn()
+            conn.autocommit = False
+            return conn
+        except pool.PoolError as e:
+            if "exhausted" not in str(e).lower():
+                raise
+            if time.monotonic() >= deadline:
+                raise pool.PoolError(
+                    f"Timed out waiting for DB connection after {wait_timeout:.2f}s"
+                ) from e
+            time.sleep(wait_poll)
 
 def release_connection(conn):
     if conn:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         get_db_pool().putconn(conn)
 
 
@@ -45,7 +183,7 @@ def get_all_tables(conn=None):
             conn = get_connection()
             close_conn = True
         except Exception as e:
-            st.error(f"Database connection error: {e}")
+            report_error("Database connection error.", e, "crud.get_all_tables.connect")
             return []
 
     try:
@@ -65,7 +203,7 @@ def get_all_tables(conn=None):
         )
         return df["table_name"].tolist()
     except Exception as e:
-        st.error(f"Error fetching tables: {e}")
+        report_error("Error fetching tables.", e, "crud.get_all_tables")
         return []
     finally:
         if close_conn and conn:
@@ -93,7 +231,7 @@ def get_next_cycle(user_id, module):
         last_cycle = cur.fetchone()[0]
         return last_cycle + 1
     except Exception as e:
-        st.error(f"Error getting next cycle: {e}")
+        report_error("Error getting next cycle.", e, "crud.get_next_cycle")
         return 1
     finally:
         if cur:
@@ -104,6 +242,7 @@ def get_next_cycle(user_id, module):
 
 # ================= SAVE DRAFT =================
 def save_draft_record(table, data, user_id, master_id=None):
+    table = ensure_valid_table_name(table)
     user_id = int(user_id)
     conn = None
     cur = None
@@ -244,7 +383,7 @@ def update_master_attachments(master_id, estimate_path=None, sar_path=None):
         conn.commit()
         return True
     except Exception as e:
-        st.error(f"Error updating attachments: {e}")
+        report_error("Error updating attachments.", e, "crud.update_master_attachments")
         if conn:
             conn.rollback()
         return False
@@ -289,7 +428,7 @@ def update_master_submission(master_id, estimate_number=None, year_of_estimate=N
         conn.commit()
         return True
     except Exception as e:
-        st.error(f"Error updating master metadata: {e}")
+        report_error("Error updating master metadata.", e, "crud.update_master_submission")
         if conn:
             conn.rollback()
         return False
@@ -303,25 +442,45 @@ def update_master_submission(master_id, estimate_number=None, year_of_estimate=N
 # ================= CREATE MASTER SUBMISSION =================
 def create_master_submission(user_id, module, tables, status='COMPLETED', estimate_number=None, year_of_estimate=None, name_of_project=None):
     user_id = int(user_id)
-    
-    # Hard uniqueness check for (name_of_project, estimate_number, year_of_estimate) 
-    # ONLY for contract management
-    if module == "contract_management" and name_of_project and estimate_number and year_of_estimate:
-
-        # Check if exactly this combination already exists 
-        existing = get_submissions_by_estimate(estimate_number, year_of_estimate, module=module, name_of_project=name_of_project)
-
-        if existing:
-            raise ValueError(f"An application with Name: '{name_of_project}', Estimate No: '{estimate_number}' and Year: '{year_of_estimate}' already exists.")
-
-    cycle = get_next_cycle(user_id, module)
-
 
     conn = None
     cur = None
     try:
         conn = get_connection()
         cur = conn.cursor()
+
+        # Hard uniqueness check for (name_of_project, estimate_number, year_of_estimate)
+        # ONLY for contract management
+        if module == "contract_management" and name_of_project and estimate_number and year_of_estimate:
+            cur.execute(
+                """
+                SELECT 1
+                FROM master_submission
+                WHERE LOWER(estimate_number) = LOWER(%s)
+                  AND year_of_estimate = %s
+                  AND module = %s
+                  AND LOWER(name_of_project) = LOWER(%s)
+                LIMIT 1
+                """,
+                (estimate_number, year_of_estimate, module, name_of_project),
+            )
+            if cur.fetchone():
+                raise ValueError(
+                    f"An application with Name: '{name_of_project}', Estimate No: '{estimate_number}' and Year: '{year_of_estimate}' already exists."
+                )
+
+        # Compute cycle inside the same DB session to avoid extra connection churn.
+        cur.execute(
+            """
+            SELECT COALESCE(MAX(cycle), 0)
+            FROM master_submission
+            WHERE user_id=%s
+              AND module=%s
+            """,
+            (user_id, module),
+        )
+        row = cur.fetchone()
+        cycle = (row[0] if row and row[0] is not None else 0) + 1
 
         cur.execute(
             """
@@ -336,14 +495,17 @@ def create_master_submission(user_id, module, tables, status='COMPLETED', estima
 
         # Always attach any unattached drafts for this user to the new master_id
         for table in tables:
+            table = ensure_valid_table_name(table)
             cur.execute(
-                f"""
-                UPDATE "{table}"
-                SET master_id=%s,
-                    is_draft=TRUE
-                WHERE created_by=%s
-                AND master_id IS NULL
-            """,
+                sql.SQL(
+                    """
+                    UPDATE {table}
+                    SET master_id=%s,
+                        is_draft=TRUE
+                    WHERE created_by=%s
+                    AND master_id IS NULL
+                    """
+                ).format(table=sql.Identifier(table)),
                 (master_id, user_id),
             )
 
@@ -375,7 +537,7 @@ def update_master_status(master_id, status):
         conn.commit()
         return True
     except Exception as e:
-        st.error(f"Error updating master status: {e}")
+        report_error("Error updating master status.", e, "crud.update_master_status")
         if conn:
             conn.rollback()
         return False
@@ -419,7 +581,7 @@ def get_user_master_submissions(user_id, module):
         records = [dict(zip(columns, row)) for row in cur.fetchall()]
         return records
     except Exception as e:
-        st.error(f"Error getting user master submissions: {e}")
+        report_error("Error getting user submissions.", e, "crud.get_user_master_submissions")
         return []
     finally:
         if cur:
@@ -448,7 +610,7 @@ def get_user_master_submissions_admin(user_id):
         records = [dict(zip(columns, row)) for row in cur.fetchall()]
         return records
     except Exception as e:
-        st.error(f"Error getting admin submissions: {e}")
+        report_error("Error getting admin submissions.", e, "crud.get_user_master_submissions_admin")
         return []
     finally:
         if cur:
@@ -502,8 +664,11 @@ def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None, name_
         records = [dict(zip(columns, row)) for row in cur.fetchall()]
         return records
     except Exception as e:
-        # Avoid showing internal SQL error if we missed a placeholder case, but report generally
-        st.error(f"Error fetching applications for this estimate ({module or 'global'}): {e}")
+        report_error(
+            f"Error fetching applications for this estimate ({module or 'global'}).",
+            e,
+            "crud.get_submissions_by_estimate",
+        )
         return []
 
     finally:
@@ -531,7 +696,7 @@ def get_master_submission(master_id):
         row = cur.fetchone()
         return dict(zip(columns, row)) if row else None
     except Exception as e:
-        st.error(f"Error getting master submission: {e}")
+        report_error("Error getting master submission.", e, "crud.get_master_submission")
         return None
     finally:
         if cur:
@@ -543,29 +708,32 @@ def get_master_submission(master_id):
 # ================= GET FULL SUBMISSION DATA =================
 def get_full_submission_data(master_id):
     conn = None
+    cur = None
     full_data = {}
     try:
         conn = get_connection()
+        cur = conn.cursor()
         tables = get_all_tables(conn)
-
-
         for table in tables:
-            df = pd.read_sql(
-                f"""
+            table = ensure_valid_table_name(table)
+            query = sql.SQL(
+                """
                 SELECT *
-                FROM "{table}"
+                FROM {table}
                 WHERE master_id=%s
-            """,
-                conn,
-                params=[master_id],
-            )
-
-            if not df.empty:
-                full_data[table] = df
+                """
+            ).format(table=sql.Identifier(table))
+            cur.execute(query, (master_id,))
+            rows = cur.fetchall()
+            if rows:
+                columns = [desc[0] for desc in cur.description]
+                full_data[table] = pd.DataFrame(rows, columns=columns)
 
     except Exception as e:
-        st.error(f"Error getting full submission data: {e}")
+        report_error("Error getting full submission data.", e, "crud.get_full_submission_data")
     finally:
+        if cur:
+            cur.close()
         if conn:
             release_connection(conn)
     return full_data
@@ -578,26 +746,31 @@ def get_full_draft_data(user_id, module_tables):
     Returns a dict of {table_name: DataFrame}
     """
     conn = None
+    cur = None
     full_data = {}
     try:
         conn = get_connection()
+        cur = conn.cursor()
         for table in module_tables:
-            df = pd.read_sql(
-                f"""
+            table = ensure_valid_table_name(table)
+            query = sql.SQL(
+                """
                 SELECT *
-                FROM "{table}"
+                FROM {table}
                 WHERE created_by=%s AND is_draft=TRUE
-            """,
-                conn,
-                params=[user_id],
-            )
-
-            if not df.empty:
-                full_data[table] = df
+                """
+            ).format(table=sql.Identifier(table))
+            cur.execute(query, (user_id,))
+            rows = cur.fetchall()
+            if rows:
+                columns = [desc[0] for desc in cur.description]
+                full_data[table] = pd.DataFrame(rows, columns=columns)
 
     except Exception as e:
-        st.error(f"Error getting full draft data: {e}")
+        report_error("Error getting full draft data.", e, "crud.get_full_draft_data")
     finally:
+        if cur:
+            cur.close()
         if conn:
             release_connection(conn)
     return full_data
@@ -619,31 +792,28 @@ def get_user_progress(user_id, tables, master_id=None):
     try:
         conn = get_connection()
         cur = conn.cursor()
-        
-        # Use UNION ALL to check all labels efficiently
-        checks = []
+
         if not master_id:
             return 0, 0, total
 
         for table in tables:
-            checks.append(f"""
-                SELECT '{table}' WHERE EXISTS (
-                    SELECT 1 FROM "{table}" WHERE created_by=%s AND master_id=%s
+            table = ensure_valid_table_name(table)
+            query = sql.SQL(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM {table}
+                    WHERE created_by=%s AND master_id=%s
                 )
-            """)
-        
-        if checks:
-            combined = " UNION ALL ".join(checks)
-            params = []
-            for _ in tables:
-                params.extend([user_id, master_id])
-            
-            cur.execute(combined, params)
-            rows = cur.fetchall()
-            completed = len(rows)
+                """
+            ).format(table=sql.Identifier(table))
+            cur.execute(query, (user_id, master_id))
+            exists = cur.fetchone()[0]
+            if exists:
+                completed += 1
 
     except Exception as e:
-        raise e
+        report_error("Error calculating user progress.", e, "crud.get_user_progress")
+        return 0, 0, total
     finally:
         if cur:
             cur.close()
@@ -663,13 +833,16 @@ def set_drafts_to_final(master_id, tables):
         conn = get_connection()
         cur = conn.cursor()
         for table in tables:
+            table = ensure_valid_table_name(table)
             cur.execute(
-                f'UPDATE "{table}" SET is_draft=FALSE WHERE master_id=%s',
+                sql.SQL("UPDATE {table} SET is_draft=FALSE WHERE master_id=%s").format(
+                    table=sql.Identifier(table)
+                ),
                 (master_id,)
             )
         conn.commit()
     except Exception as e:
-        st.error(f"Error finalizing drafts: {e}")
+        report_error("Error finalizing drafts.", e, "crud.set_drafts_to_final")
         if conn:
             conn.rollback()
     finally:
@@ -694,27 +867,29 @@ def get_incomplete_forms(user_id, tables, master_id=None):
     try:
         conn = get_connection()
         cur = conn.cursor()
-        
-        # Get list of completed tables first
-        if not master_id:
-             return tables # All are incomplete if no master_id
 
-        checks = []
+        if not master_id:
+            return tables
+
+        completed_tables = []
         for table in tables:
-            checks.append(f"SELECT '{table}' WHERE EXISTS (SELECT 1 FROM \"{table}\" WHERE created_by=%s AND master_id=%s)")
-        
-        if checks:
-            combined = " UNION ALL ".join(checks)
-            params = []
-            for _ in tables:
-                 params.extend([user_id, master_id])
-                    
-            cur.execute(combined, params)
-            completed_tables = [row[0] for row in cur.fetchall()]
-            incomplete = [t for t in tables if t not in completed_tables]
-            
+            table = ensure_valid_table_name(table)
+            query = sql.SQL(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM {table}
+                    WHERE created_by=%s AND master_id=%s
+                )
+                """
+            ).format(table=sql.Identifier(table))
+            cur.execute(query, (user_id, master_id))
+            if cur.fetchone()[0]:
+                completed_tables.append(table)
+
+        incomplete = [t for t in tables if t not in completed_tables]
+
     except Exception as e:
-        st.error(f"Error getting incomplete forms: {e}")
+        report_error("Error getting incomplete forms.", e, "crud.get_incomplete_forms")
     finally:
         if cur:
             cur.close()
@@ -751,7 +926,7 @@ def get_user_draft_summaries(user_id):
         
         return final_records
     except Exception as e:
-        st.error(f"Error getting draft summaries: {e}")
+        report_error("Error getting draft summaries.", e, "crud.get_user_draft_summaries")
         return []
     finally:
         if cur:
@@ -765,7 +940,9 @@ def get_user_master_status_counts(user_id, all_modules=None):
     user_id = int(user_id)
 
     conn = None
-    approved = rejected = pending = drafts = 0
+    cur = None
+    submitted = 0
+    drafts = 0
 
     try:
         conn = get_connection()
@@ -787,8 +964,10 @@ def get_user_master_status_counts(user_id, all_modules=None):
             drafts = len(draft_list)
 
     except Exception as e:
-        st.error(f"Error getting master status counts: {e}")
+        report_error("Error getting master status counts.", e, "crud.get_user_master_status_counts")
     finally:
+        if cur:
+            cur.close()
         if conn:
             release_connection(conn)
 
@@ -799,17 +978,28 @@ def get_user_master_status_counts(user_id, all_modules=None):
 # ================= EXPORT MASTER PDF =================
 def delete_unattached_drafts(user_id, tables):
     """Deletes any records where master_id is NULL for the given user (un-saved lazy drafts)."""
+    conn = None
+    cur = None
     try:
         conn = get_connection()
         cur = conn.cursor()
         for table in tables:
-            # We only delete if master_id is NULL (unattached)
-            cur.execute(f'DELETE FROM "{table}" WHERE created_by = %s AND master_id IS NULL', (user_id,))
+            table = ensure_valid_table_name(table)
+            cur.execute(
+                sql.SQL("DELETE FROM {table} WHERE created_by = %s AND master_id IS NULL").format(
+                    table=sql.Identifier(table)
+                ),
+                (user_id,),
+            )
         conn.commit()
     except Exception as e:
-        print(f"Error deleting unattached drafts: {e}")
+        report_error("Error deleting unattached drafts.", e, "crud.delete_unattached_drafts")
+        if conn:
+            conn.rollback()
     finally:
-        if 'conn' in locals() and conn:
+        if cur:
+            cur.close()
+        if conn:
             release_connection(conn)
 
 
@@ -884,13 +1074,18 @@ def export_master_submission_pdf(master_id):
         MAX_COLS_PER_TABLE = 15  # 🔥 change if needed
 
         for table in tables:
-
-            df = pd.read_sql(
-                f'SELECT * FROM "{table}" WHERE master_id=%s', conn, params=[master_id]
+            table = ensure_valid_table_name(table)
+            cur.execute(
+                sql.SQL("SELECT * FROM {table} WHERE master_id=%s").format(
+                    table=sql.Identifier(table)
+                ),
+                (master_id,),
             )
-
-            if df.empty:
+            rows = cur.fetchall()
+            if not rows:
                 continue
+            columns = [desc[0] for desc in cur.description]
+            df = pd.DataFrame(rows, columns=columns)
 
             # 🔥 Filter out system columns requested by user
             cols_to_exclude = [
@@ -955,7 +1150,7 @@ def export_master_submission_pdf(master_id):
 
         doc.build(elements)
     except Exception as e:
-        st.error(f"Error exporting PDF: {e}")
+        report_error("Error exporting PDF.", e, "crud.export_master_submission_pdf")
     finally:
         if cur:
             cur.close()
@@ -972,6 +1167,7 @@ def get_table_columns(table, is_admin=False):
     conn = None
     cur = None
     try:
+        table = ensure_valid_table_name(table)
         conn = get_connection()
         cur = conn.cursor()
 
@@ -1006,7 +1202,7 @@ def get_table_columns(table, is_admin=False):
             records = [r for r in records if r["column_name"] not in system_fields]
         return records
     except Exception as e:
-        st.error(f"Error getting table columns: {e}")
+        report_error("Error getting table columns.", e, "crud.get_table_columns")
         return []
     finally:
         if cur:
@@ -1019,6 +1215,7 @@ def get_user_draft(table, user_id, master_id=None):
     conn = None
     cur = None
     try:
+        table = ensure_valid_table_name(table)
         conn = get_connection()
         cur = conn.cursor()
 
@@ -1052,7 +1249,7 @@ def get_user_draft(table, user_id, master_id=None):
 
         return dict(zip(columns, row))
     except Exception as e:
-        st.error(f"Error getting user draft: {e}")
+        report_error("Error getting user draft.", e, "crud.get_user_draft")
         return None
     finally:
         if cur:
@@ -1097,17 +1294,28 @@ def get_master_status(master_id):
             return result[0]
         return None
     except Exception as e:
-        st.error(f"Error getting master status: {e}")
+        report_error("Error getting master status.", e, "crud.get_master_status")
         return None
     finally:
         if cur:
             cur.close()
         if conn:
             release_connection(conn)
-def create_user(username, password, role="USER", allowed_modules=""):
+def create_user(username, password, role="operator", allowed_modules=""):
     """
     Creates a new user. Returns (True, "Success message") or (False, "Error message").
     """
+    username = (username or "").strip()
+    role = (role or "operator").strip().lower()
+    allowed_modules = (allowed_modules or "").strip()
+
+    if not username:
+        return False, "Username cannot be empty."
+    if not isinstance(password, str) or len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+    if role not in {"admin", "operator"}:
+        return False, "Invalid role selected."
+
     conn = get_connection()
     cur = conn.cursor()
 
@@ -1118,16 +1326,18 @@ def create_user(username, password, role="USER", allowed_modules=""):
             return False, f"Username '{username}' already exists. Please choose a unique username."
 
         # Insert new user
+        password_hash = hash_password(password)
         cur.execute(
             "INSERT INTO users (username, password_hash, role, is_active, allowed_modules) VALUES (%s, %s, %s, TRUE, %s)",
-            (username, password, role, allowed_modules)
+            (username, password_hash, role, allowed_modules)
         )
         conn.commit()
         return True, f"User '{username}' created successfully!"
 
     except Exception as e:
         conn.rollback()
-        return False, f"Database error: {str(e)}"
+        report_error("Error creating user.", e, "crud.create_user")
+        return False, "Database error while creating user."
     finally:
         cur.close()
         release_connection(conn)
@@ -1139,7 +1349,7 @@ def get_all_users_admin():
         df = pd.read_sql("SELECT id, username, role, is_active, allowed_modules FROM users ORDER BY id", conn)
         return df
     except Exception as e:
-        st.error(f"Error getting all users admin: {e}")
+        report_error("Error getting users list.", e, "crud.get_all_users_admin")
         return pd.DataFrame(columns=["id", "username", "role", "is_active"])
     finally:
         if conn:
@@ -1166,7 +1376,7 @@ def get_user_by_id(uid):
             }
         return None
     except Exception as e:
-        st.error(f"Error fetching user by ID: {e}")
+        report_error("Error fetching user.", e, "crud.get_user_by_id")
         return None
     finally:
         if cur:
@@ -1184,7 +1394,7 @@ def toggle_user_status(user_id, current_status):
         cur.execute("UPDATE users SET is_active = %s WHERE id = %s", (new_status, user_id))
         conn.commit()
     except Exception as e:
-        st.error(f"Error toggling user status: {e}")
+        report_error("Error toggling user status.", e, "crud.toggle_user_status")
         if conn:
             conn.rollback()
     finally:
@@ -1206,7 +1416,7 @@ def update_user_modules(user_id, modules_list):
         cur.execute("UPDATE users SET allowed_modules = %s WHERE id = %s", (modules_str, user_id))
         conn.commit()
     except Exception as e:
-        st.error(f"Error updating user modules: {e}")
+        report_error("Error updating user modules.", e, "crud.update_user_modules")
         if conn:
             conn.rollback()
     finally:

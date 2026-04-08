@@ -1,0 +1,28 @@
+{
+  "run_tag": "LT20260409005143",
+  "module": "canal_performance",
+  "tables_to_fill": [
+    "canal_performance_annual_maintenence"
+  ],
+  "virtual_users": 5,
+  "concurrency": 2,
+  "success_count": 5,
+  "failure_count": 0,
+  "success_rate_pct": 100.0,
+  "total_duration_s": 0.097,
+  "throughput_flows_per_s": 51.372,
+  "latency_ms": {
+    "min": 2.93,
+    "p50": 3.43,
+    "p95": 70.35,
+    "p99": 70.57,
+    "max": 70.63,
+    "mean": 29.85
+  },
+  "user_reuse": false,
+  "available_operator_users": 9,
+  "temp_users_created": 0,
+  "set_status": "DRAFT",
+  "fields_per_section": 8,
+  "year_of_estimate": "2026-27"
+}
