@@ -775,15 +775,50 @@ body:has(.dashboard-no-padding-trigger) .stButton>button {
    FILE UPLOADER
    ============================================================ */
 [data-testid="stFileUploader"] {
-    border: 1.5px dashed var(--border) !important;
-    border-radius: 8px !important;
-    background: var(--bg-surface) !important;
-    padding: 16px !important;
-    transition: border-color 0.15s;
+    border: 1px solid #dbe2ee !important;
+    border-radius: 6px !important;
+    background: #fbfcff !important;
+    padding: 4px 6px !important;
+    margin-bottom: 4px !important;
+    transition: border-color 0.12s, background 0.12s;
 }
 
 [data-testid="stFileUploader"]:hover {
-    border-color: var(--navy) !important;
+    border-color: #b8c5dd !important;
+    background: #ffffff !important;
+}
+
+/* Compact inner drop area and browse button */
+[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploader"] [data-testid="stFileUploadDropzone"] {
+    padding: 2px 6px !important;
+    min-height: 34px !important;
+    border-radius: 5px !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] p {
+    font-size: 10px !important;
+    line-height: 1.1 !important;
+    margin: 0 !important;
+}
+
+[data-testid="stFileUploader"] svg {
+    width: 16px !important;
+    height: 16px !important;
+}
+
+[data-testid="stFileUploader"] button {
+    min-height: 24px !important;
+    padding: 1px 8px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    border-radius: 999px !important;
+    border: 1px solid #c8d3e6 !important;
+    background: #ffffff !important;
+    color: var(--navy) !important;
 }
 
 /* ============================================================

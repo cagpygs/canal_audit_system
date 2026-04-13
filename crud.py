@@ -702,6 +702,235 @@ def _normalize_text_value(value):
     return text_value if text_value else None
 
 
+def ensure_contract_quality_table_schema():
+    table_name = "contract_management_quality_test"
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = %s
+            LIMIT 1
+            """,
+            (table_name,),
+        )
+        if not cur.fetchone():
+            conn.commit()
+            return True
+
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = %s
+            """,
+            (table_name,),
+        )
+        existing_cols = {row[0] for row in cur.fetchall()}
+
+        rename_pairs = [
+            ("user_id", "created_by"),
+            ("estimate", "estimate_number"),
+            ("agreement_no", "agreement_number"),
+            ("officer_who_executed_the_contract", "designation_of_officer_executed_contract"),
+        ]
+
+        for old_col, new_col in rename_pairs:
+            if old_col in existing_cols and new_col not in existing_cols:
+                cur.execute(
+                    sql.SQL("ALTER TABLE {table} RENAME COLUMN {old_col} TO {new_col}")
+                    .format(
+                        table=sql.Identifier(table_name),
+                        old_col=sql.Identifier(old_col),
+                        new_col=sql.Identifier(new_col),
+                    )
+                )
+                existing_cols.remove(old_col)
+                existing_cols.add(new_col)
+
+        common_cols = [
+            ("name_of_project", "TEXT"),
+            ("estimate_number", "TEXT"),
+            ("year_of_estimate", "TEXT"),
+            ("agreement_number", "TEXT"),
+            ("year_of_agreement", "TEXT"),
+            ("designation_of_officer_executed_contract", "TEXT"),
+            ("status", "TEXT DEFAULT 'Pending'"),
+            ("created_by", "INTEGER"),
+            ("approved_by", "TEXT"),
+            ("approved_at", "TIMESTAMP"),
+            ("is_draft", "BOOLEAN DEFAULT TRUE"),
+            ("master_id", "INTEGER"),
+            ("approval_status", "TEXT"),
+            ("draft_id", "TEXT"),
+            ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+        ]
+
+        for col_name, col_type in common_cols:
+            cur.execute(
+                sql.SQL("ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+                .format(
+                    table=sql.Identifier(table_name),
+                    col_name=sql.Identifier(col_name),
+                    col_type=sql.SQL(col_type),
+                )
+            )
+
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = %s
+            """,
+            (table_name,),
+        )
+        existing_cols = {row[0] for row in cur.fetchall()}
+
+        if "user_id" in existing_cols and "created_by" in existing_cols:
+            cur.execute(
+                sql.SQL(
+                    """
+                    UPDATE {table}
+                    SET created_by = COALESCE(created_by, user_id)
+                    """
+                ).format(table=sql.Identifier(table_name))
+            )
+            cur.execute(
+                sql.SQL("ALTER TABLE {table} DROP COLUMN IF EXISTS {old_col}")
+                .format(
+                    table=sql.Identifier(table_name),
+                    old_col=sql.Identifier("user_id"),
+                )
+            )
+            existing_cols.remove("user_id")
+
+        text_migrations = [
+            ("estimate", "estimate_number"),
+            ("agreement_no", "agreement_number"),
+            ("officer_who_executed_the_contract", "designation_of_officer_executed_contract"),
+        ]
+        for old_col, new_col in text_migrations:
+            if old_col in existing_cols and new_col in existing_cols:
+                cur.execute(
+                    sql.SQL(
+                        """
+                        UPDATE {table}
+                        SET {new_col} = COALESCE(
+                            NULLIF(TRIM({new_col}), ''),
+                            NULLIF(TRIM({old_col}), '')
+                        )
+                        """
+                    ).format(
+                        table=sql.Identifier(table_name),
+                        new_col=sql.Identifier(new_col),
+                        old_col=sql.Identifier(old_col),
+                    )
+                )
+                cur.execute(
+                    sql.SQL("ALTER TABLE {table} DROP COLUMN IF EXISTS {old_col}")
+                    .format(
+                        table=sql.Identifier(table_name),
+                        old_col=sql.Identifier(old_col),
+                    )
+                )
+
+        cur.execute(
+            sql.SQL(
+                """
+                UPDATE {table}
+                SET status = COALESCE(NULLIF(TRIM(status), ''), 'Pending'),
+                    is_draft = COALESCE(is_draft, TRUE),
+                    created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+                """
+            ).format(table=sql.Identifier(table_name))
+        )
+
+        cur.execute(
+            sql.SQL(
+                """
+                UPDATE {table} q
+                SET name_of_project = source.name_of_project
+                FROM (
+                    SELECT DISTINCT ON (
+                        user_id,
+                        TRIM(COALESCE(estimate_number, '')),
+                        TRIM(COALESCE(year_of_estimate, ''))
+                    )
+                        user_id,
+                        TRIM(COALESCE(estimate_number, '')) AS estimate_key,
+                        TRIM(COALESCE(year_of_estimate, '')) AS year_key,
+                        name_of_project
+                    FROM master_submission
+                    WHERE module = 'contract_management'
+                      AND name_of_project IS NOT NULL
+                      AND TRIM(name_of_project) <> ''
+                    ORDER BY
+                        user_id,
+                        TRIM(COALESCE(estimate_number, '')),
+                        TRIM(COALESCE(year_of_estimate, '')),
+                        id DESC
+                ) source
+                WHERE (q.name_of_project IS NULL OR TRIM(q.name_of_project) = '')
+                  AND q.created_by = source.user_id
+                  AND TRIM(COALESCE(q.estimate_number, '')) = source.estimate_key
+                  AND TRIM(COALESCE(q.year_of_estimate, '')) = source.year_key
+                """
+            ).format(table=sql.Identifier(table_name))
+        )
+
+        cur.execute(
+            sql.SQL(
+                """
+                UPDATE {table} q
+                SET master_id = source.master_id
+                FROM (
+                    SELECT DISTINCT ON (
+                        user_id,
+                        TRIM(COALESCE(estimate_number, '')),
+                        TRIM(COALESCE(year_of_estimate, ''))
+                    )
+                        id AS master_id,
+                        user_id,
+                        TRIM(COALESCE(estimate_number, '')) AS estimate_key,
+                        TRIM(COALESCE(year_of_estimate, '')) AS year_key
+                    FROM master_submission
+                    WHERE module = 'contract_management'
+                    ORDER BY
+                        user_id,
+                        TRIM(COALESCE(estimate_number, '')),
+                        TRIM(COALESCE(year_of_estimate, '')),
+                        id DESC
+                ) source
+                WHERE q.master_id IS NULL
+                  AND q.created_by = source.user_id
+                  AND TRIM(COALESCE(q.estimate_number, '')) = source.estimate_key
+                  AND TRIM(COALESCE(q.year_of_estimate, '')) = source.year_key
+                """
+            ).format(table=sql.Identifier(table_name))
+        )
+
+        conn.commit()
+        return True
+    except Exception as e:
+        report_error("Error ensuring quality table schema.", e, "crud.ensure_contract_quality_table_schema")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
 def ensure_project_dpr_table():
     conn = None
     cur = None
@@ -1632,6 +1861,8 @@ def get_table_columns(table, is_admin=False):
 
         system_fields = (
             "id",
+            "user_id",
+            "module",
             "created_by",
             "is_draft",
             "master_id",
@@ -1640,6 +1871,7 @@ def get_table_columns(table, is_admin=False):
             "approved_at",
             "submission_cycle",
             "created_at",
+            "updated_at",
             "status",
             "approved_by",
             "draft_id",

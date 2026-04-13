@@ -22,6 +22,7 @@ from crud import (
     get_user_master_submissions_admin,
     get_user_progress,
     save_draft_record,
+    ensure_contract_quality_table_schema,
     ensure_project_dpr_table,
     set_drafts_to_final,
     toggle_user_status,
@@ -192,6 +193,8 @@ if "module_return_flow_history" not in st.session_state:
     st.session_state.module_return_flow_history = []
 if "project_dpr_table_ready" not in st.session_state:
     st.session_state.project_dpr_table_ready = ensure_project_dpr_table()
+if "quality_table_schema_ready" not in st.session_state:
+    st.session_state.quality_table_schema_ready = ensure_contract_quality_table_schema()
 if "mini_dashboard_filter" not in st.session_state:
     st.session_state.mini_dashboard_filter = "DPR"
 
@@ -765,23 +768,15 @@ def render_estimate_group_page(est_no, est_yr, user_id=None, module=None):
                     unsafe_allow_html=True,
                 )
                 if status == "COMPLETED":
-                    cnt = sum([
-                        1 if (s.get("estimate_attachment") or "").strip() else 0,
-                        1 if (s.get("sar_attachment") or "").strip() else 0,
-                    ])
-                    if cnt == 0:
+                    has_estimate_file = bool((s.get("estimate_attachment") or "").strip())
+                    if not has_estimate_file:
                         st.markdown(
-                            "<div style='margin-top:4px;font-size:11px;font-weight:600;color:#dc2626;'>Missing Files</div>",
-                            unsafe_allow_html=True,
-                        )
-                    elif cnt == 1:
-                        st.markdown(
-                            "<div style='margin-top:4px;font-size:11px;font-weight:600;color:#d97706;'>1/2 Uploaded</div>",
+                            "<div style='margin-top:4px;font-size:11px;font-weight:600;color:#dc2626;'>Estimate Missing</div>",
                             unsafe_allow_html=True,
                         )
                     else:
                         st.markdown(
-                            "<div style='margin-top:4px;font-size:11px;font-weight:600;color:#059669;'>Both Uploaded</div>",
+                            "<div style='margin-top:4px;font-size:11px;font-weight:600;color:#059669;'>Estimate Uploaded</div>",
                             unsafe_allow_html=True,
                         )
 
@@ -845,47 +840,25 @@ def render_estimate_group_page(est_no, est_yr, user_id=None, module=None):
                 p_nm = clean_n(m_info.get("name_of_project", "NA"))
                 e_yr = clean_n(m_info.get("year_of_estimate", "NA"))
 
-            c1, c2 = st.columns(2)
-            with c1:
-                curr_est = m_info.get("estimate_attachment")
-                if curr_est and os.path.exists(curr_est):
-                    st.success(f"Estimate on record: `{os.path.basename(curr_est)}`")
-                est_f = st.file_uploader(
-                    "Upload / Replace Estimate",
-                    type=["pdf", "docx", "xlsx", "jpg", "png"],
-                    key=f"dlg_up_est_{up_id}",
-                )
-                if est_f:
-                    fid = f"{est_f.name}_{est_f.size}"
-                    if st.session_state.get(f"last_up_est_{up_id}") != fid:
-                        ext = os.path.splitext(est_f.name)[1]
-                        spath = os.path.join("uploads", f"Estimate_{e_no}_{p_nm}_{e_yr}{ext}")
-                        with open(spath, "wb") as f:
-                            f.write(est_f.getbuffer())
-                        update_master_attachments(up_id, estimate_path=spath)
-                        st.session_state[f"last_up_est_{up_id}"] = fid
-                        st.success("Estimate uploaded successfully!")
-                        st.rerun()
-            with c2:
-                curr_sar = m_info.get("sar_attachment")
-                if curr_sar and os.path.exists(curr_sar):
-                    st.success(f"SAR on record: `{os.path.basename(curr_sar)}`")
-                sar_f = st.file_uploader(
-                    "Upload / Replace SAR",
-                    type=["pdf", "docx", "xlsx", "jpg", "png"],
-                    key=f"dlg_up_sar_{up_id}",
-                )
-                if sar_f:
-                    fid = f"{sar_f.name}_{sar_f.size}"
-                    if st.session_state.get(f"last_up_sar_{up_id}") != fid:
-                        ext = os.path.splitext(sar_f.name)[1]
-                        spath = os.path.join("uploads", f"SAR_{e_no}_{p_nm}_{e_yr}{ext}")
-                        with open(spath, "wb") as f:
-                            f.write(sar_f.getbuffer())
-                        update_master_attachments(up_id, sar_path=spath)
-                        st.session_state[f"last_up_sar_{up_id}"] = fid
-                        st.success("SAR uploaded successfully!")
-                        st.rerun()
+            curr_est = m_info.get("estimate_attachment")
+            if curr_est and os.path.exists(curr_est):
+                st.success(f"Estimate on record: `{os.path.basename(curr_est)}`")
+            est_f = st.file_uploader(
+                "Upload / Replace Estimate",
+                type=["pdf", "docx", "xlsx", "jpg", "png"],
+                key=f"dlg_up_est_{up_id}",
+            )
+            if est_f:
+                fid = f"{est_f.name}_{est_f.size}"
+                if st.session_state.get(f"last_up_est_{up_id}") != fid:
+                    ext = os.path.splitext(est_f.name)[1]
+                    spath = os.path.join("uploads", f"Estimate_{e_no}_{p_nm}_{e_yr}{ext}")
+                    with open(spath, "wb") as f:
+                        f.write(est_f.getbuffer())
+                    update_master_attachments(up_id, estimate_path=spath)
+                    st.session_state[f"last_up_est_{up_id}"] = fid
+                    st.success("Estimate uploaded successfully!")
+                    st.rerun()
             if st.button("Close Upload Panel", key=f"close_dlg_up_{safe_est}"):
                 del st.session_state.show_up_id
                 st.rerun()
@@ -3300,86 +3273,86 @@ if not is_admin:
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
     if incomplete_sections:
-        st.error("**The following sections still need to be completed before submission:**")
+        st.warning("Some sections are still incomplete. You can upload attachments now and continue filling sections.")
         for idx, sec in enumerate(incomplete_sections, 1):
-            clean_name = sec.replace(prefix,"").replace("_"," ").title()
+            clean_name = sec.replace(prefix, "").replace("_", " ").title()
             st.markdown(f"&nbsp;&nbsp;&nbsp;**{idx}.** {clean_name}")
-    else:
-        st.markdown("""
-        <div class="submit-cta" style="background:#fffbeb; border-top-color:#d97706;">
-            <h3 style="color:#92400e;">Required Attachments</h3>
-            <p>Upload the mandatory documents below to enable final submission.</p>
-        </div>
-        """, unsafe_allow_html=True)
 
-        col_u1, col_u2 = st.columns(2)
-        m_id        = st.session_state.master_id
+    st.markdown("""
+    <div class="submit-cta" style="background:#fffbeb; border-top-color:#d97706;">
+        <h3 style="color:#92400e;">Required Attachments</h3>
+        <p>Upload the mandatory documents below.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not master_id_active:
+        st.info("Save at least one section once to initialize the application, then upload files here.")
+    else:
+        m_id = st.session_state.master_id
         master_info = get_master_submission(m_id)
         existing_est = master_info.get("estimate_attachment")
-        existing_sar = master_info.get("sar_attachment")
 
-        def clean(s): return "".join([c if c.isalnum() or c in ('-','_') else '_' for c in str(s)])
+        def clean(s): return "".join([c if c.isalnum() or c in ('-', '_') else '_' for c in str(s)])
 
-        with col_u1:
-            if existing_est:
-                st.success(f"Estimate Uploaded: `{os.path.basename(existing_est)}`")
-            est_file = st.file_uploader("Upload Estimate",
-                type=['pdf','docx','xlsx','jpg','png'], key="uploader_estimate")
-            if est_file:
-                fid = f"{est_file.name}_{est_file.size}"
-                if st.session_state.get("last_est_id") != fid:
-                    full_data = get_full_submission_data(m_id)
-                    sub_data  = full_data.get(tables[0] if tables else None)
-                    if sub_data is not None and not sub_data.empty:
-                        tr = sub_data.iloc[0]
-                        en = clean(tr.get("estimate_number",  master_info.get("estimate_number","NA")))
-                        pn = clean(tr.get("name_of_project",  master_info.get("name_of_project","NA")))
-                        ey = clean(tr.get("year_of_estimate", master_info.get("year_of_estimate","NA")))
-                    else:
-                        en = clean(master_info.get("estimate_number","NA"))
-                        pn = clean(master_info.get("name_of_project","NA"))
-                        ey = clean(master_info.get("year_of_estimate","NA"))
-                    ext   = os.path.splitext(est_file.name)[1]
-                    spath = os.path.join("uploads", f"Estimate_{en}_{pn}_{ey}{ext}")
-                    with open(spath,"wb") as f: f.write(est_file.getbuffer())
-                    update_master_attachments(m_id, estimate_path=spath)
-                    st.session_state["last_est_id"] = fid
-                    st.rerun()
-
-        with col_u2:
-            if existing_sar:
-                st.success(f"SAR Uploaded: `{os.path.basename(existing_sar)}`")
-            sar_file = st.file_uploader("Upload SAR",
-                type=['pdf','docx','xlsx','jpg','png'], key="uploader_sar")
-            if sar_file:
-                fid = f"{sar_file.name}_{sar_file.size}"
-                if st.session_state.get("last_sar_id") != fid:
-                    full_data = get_full_submission_data(m_id)
-                    sub_data  = full_data.get(tables[0] if tables else None)
-                    if sub_data is not None and not sub_data.empty:
-                        tr = sub_data.iloc[0]
-                        en = clean(tr.get("estimate_number",  master_info.get("estimate_number","NA")))
-                        pn = clean(tr.get("name_of_project",  master_info.get("name_of_project","NA")))
-                        ey = clean(tr.get("year_of_estimate", master_info.get("year_of_estimate","NA")))
-                    else:
-                        en = clean(master_info.get("estimate_number","NA"))
-                        pn = clean(master_info.get("name_of_project","NA"))
-                        ey = clean(master_info.get("year_of_estimate","NA"))
-                    ext   = os.path.splitext(sar_file.name)[1]
-                    spath = os.path.join("uploads", f"SAR_{en}_{pn}_{ey}{ext}")
-                    with open(spath,"wb") as f: f.write(sar_file.getbuffer())
-                    update_master_attachments(m_id, sar_path=spath)
-                    st.session_state["last_sar_id"] = fid
-                    st.rerun()
+        if existing_est:
+            st.success(f"Estimate Uploaded: `{os.path.basename(existing_est)}`")
+        est_file = st.file_uploader("Upload Estimate",
+            type=['pdf','docx','xlsx','jpg','png'], key="uploader_estimate")
+        if est_file:
+            fid = f"{est_file.name}_{est_file.size}"
+            if st.session_state.get("last_est_id") != fid:
+                full_data = get_full_submission_data(m_id)
+                sub_data = full_data.get(tables[0] if tables else None)
+                if sub_data is not None and not sub_data.empty:
+                    tr = sub_data.iloc[0]
+                    en = clean(tr.get("estimate_number", master_info.get("estimate_number", "NA")))
+                    pn = clean(tr.get("name_of_project", master_info.get("name_of_project", "NA")))
+                    ey = clean(tr.get("year_of_estimate", master_info.get("year_of_estimate", "NA")))
+                else:
+                    en = clean(master_info.get("estimate_number", "NA"))
+                    pn = clean(master_info.get("name_of_project", "NA"))
+                    ey = clean(master_info.get("year_of_estimate", "NA"))
+                ext = os.path.splitext(est_file.name)[1]
+                spath = os.path.join("uploads", f"Estimate_{en}_{pn}_{ey}{ext}")
+                with open(spath, "wb") as f:
+                    f.write(est_file.getbuffer())
+                update_master_attachments(m_id, estimate_path=spath)
+                st.session_state["last_est_id"] = fid
+                st.rerun()
 
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-        if st.button(" Submit My Complete Application", use_container_width=True, type="primary"):
+        sections_pending = len(incomplete_sections)
+        sections_total = len(tables)
+        sections_completed = max(sections_total - sections_pending, 0)
+        can_submit = (sections_pending == 0)
+
+        if not can_submit:
+            st.info(
+                f"Complete all sections before submitting. Progress: {sections_completed}/{sections_total} sections."
+            )
+
+        submit_clicked = st.button(
+            " Submit My Complete Application",
+            use_container_width=True,
+            type="primary",
+            disabled=not can_submit,
+        )
+        if submit_clicked:
+            # Guard again server-side so submission cannot bypass section checks.
+            latest_incomplete = get_incomplete_forms(user_id, tables, master_id=st.session_state.master_id)
+            if latest_incomplete:
+                st.error(
+                    f"Submission blocked: {len(latest_incomplete)}/{len(tables)} sections are complete. "
+                    "Please finish all tabs first."
+                )
+                st.stop()
+
             success = update_master_status(st.session_state.master_id, 'COMPLETED')
             if success:
                 set_drafts_to_final(st.session_state.master_id, tables)
                 st.balloons()
                 st.success("Application Submitted Successfully!")
-                st.session_state.master_id    = None
+                st.session_state.master_id = None
                 st.session_state.current_view = "Main"
                 st.rerun()
 

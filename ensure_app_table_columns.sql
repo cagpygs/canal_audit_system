@@ -227,6 +227,24 @@ ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUM
 ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "approval_status" text;
 ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "draft_id" text;
 
+-- contract_management_quality_test
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "id" bigint DEFAULT nextval('contract_management_quality_test_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "name_of_project" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "agreement_number" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "year_of_agreement" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "designation_of_officer_executed_contract" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "draft_id" text;
+ALTER TABLE IF EXISTS public."contract_management_quality_test" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+
 -- contract_management_technical_sanction
 ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_technical_sanction_id_seq'::regclass) NOT NULL;
 ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "estimate_number" text;
