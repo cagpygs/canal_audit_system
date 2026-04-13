@@ -1,0 +1,308 @@
+-- Auto-generated from live DB schema
+-- Generated on 2026-04-09 10:17:24
+-- Scope: tables used by app (contract_management_%, canal_performance_%, users, master_submission)
+
+BEGIN;
+
+-- canal_performance_annual_maintenence
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('canal_performance_annual_maintenence_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "name_of_division" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "division_code" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "year" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "total_main_canals" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "cca_main_canals_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "total_branch_canals" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "cca_branch_canals_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "total_distributary_canals" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "cca_dys_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "total_minor_canals" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "cca_minor_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "fund_requirement_lakh" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "fund_released_lakh" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "status" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "is_draft" boolean;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."canal_performance_annual_maintenence" ADD COLUMN IF NOT EXISTS "draft_id" integer;
+
+-- canal_performance_creation_and_utilisation_of_cca
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('canal_performance_creation_and_utilisation_of_cca_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "name_of_division" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "division_code" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "name_of_canal" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "category_of_canal" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "designed_capacity_of_canal_in_cusec" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "total_length_km" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "total_length_constructed" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "chainage_of_gap_in_the_canal" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "length_of_gap" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "cca_not_created_due_to_gaps" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "no_of_outlets_to_be_established" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "no_of_outlets_actually_established" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "total_no_of_villages_to_be_provided_water" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "total_no_of_villages_actually_provided_water" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "cca_to_be_created_in_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "cca_actually_created_in_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "cca_utilised_released_water_in_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "reason_for_short_utilisation_of_created_cca" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "status" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "is_draft" boolean;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."canal_performance_creation_and_utilisation_of_cca" ADD COLUMN IF NOT EXISTS "draft_id" integer;
+
+-- canal_performance_operation_of_canals
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('canal_performance_operation_of_canals_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "name_of_division" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "division_code" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "year" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "name_of_canal" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "category_of_canal" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "length_in_km" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "cca_in_hect" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "designed_capacity_in_cusec" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "planned_operation_days_kharif" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "actual_operation_days_kharif" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "outlets_established" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "outlets_delivered_water_kharif" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "planned_operation_days_rabi" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "actual_operation_days_rabi" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "outlets_delivered_water_rabi" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "water_delivered_last_five_outlets_kharif" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "water_delivered_last_five_outlets_rabi" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "status" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "is_draft" boolean;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."canal_performance_operation_of_canals" ADD COLUMN IF NOT EXISTS "draft_id" integer;
+
+-- canal_performance_release_of_water
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('canal_performance_release_of_water_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "name_of_division" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "division_code" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "year" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "name_of_canal_system" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "demand_of_water_at_headworks_cusec" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "release_of_water_cusec" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "demand_days" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "release_days" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "reason_for_short_release" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "status" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "is_draft" boolean;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."canal_performance_release_of_water" ADD COLUMN IF NOT EXISTS "draft_id" integer;
+
+-- contract_management_admin_financial_sanction
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_admin_financial_sanction_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "name_of_project" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "date_of_admin_financial_sanction" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "amount_admin_financial_sanction" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "total_expenditure_on_land" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "other_expenditure" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "draft_id" text;
+ALTER TABLE IF EXISTS public."contract_management_admin_financial_sanction" ADD COLUMN IF NOT EXISTS "admin_financial_number_ sanction" text;
+
+-- contract_management_budget_summary
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_budget_summary_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "name_of_project" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "original_estimated_cost" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "date_of_revision" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "revised_estimated_cost" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "total_budget_received" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "total_expenditure_on_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "total_expenditure_on_works" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "total_expenditure_on_land" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "other_expenditure" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_budget_summary" ADD COLUMN IF NOT EXISTS "draft_id" text;
+
+-- contract_management_contract_master
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_contract_master_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "name_of_project" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "designation_of_officer_technical_sanction" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "agreement_number" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "year_of_agreement" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "name_of_contractor" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "agreed_cost" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "designation_of_officer_executed_contract" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "date_of_start" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "scheduled_completion_date" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "revised_completion_date" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "status_of_completion" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "date_of_completion" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "time_extension_granted" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "liquidated_damages_recovered" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "date_of_rescission" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "security_deposit_forfeited" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "contract_closed" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "security_deposit_returned" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_contract_master" ADD COLUMN IF NOT EXISTS "draft_id" text;
+
+-- contract_management_payments_recoveries
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_payments_recoveries_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "type_of_payment" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "bill_number" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "voucher_number" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "date_of_payment" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "upto_date_payment" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "current_bill_amount" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "labour_cess" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "labour_cess_deposited" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "centage_charges" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "centage_charges_deposited" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "income_tax" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "income_tax_deposited" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "gst" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "gst_deposited" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "recovery_of_material" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "mobilisation_advance_granted" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "mobilisation_advance_recovered" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "machinery_advance_granted" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "machinery_advance_recovered" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "secured_advance_granted" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "secured_advance_recovered" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "price_adjustment_paid" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "liability_pending" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_payments_recoveries" ADD COLUMN IF NOT EXISTS "draft_id" text;
+
+-- contract_management_technical_sanction
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_technical_sanction_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "designation_of_officer_executed_contract" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "date_of_technical_sanction" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "detailed_estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "updated_estimated_cost" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "designation_of_officer_technical_sanction" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "remarks" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_technical_sanction" ADD COLUMN IF NOT EXISTS "draft_id" text;
+
+-- contract_management_tender_award_contract
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('contract_management_tender_award_contract_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "name_of_project" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "designation_of_officer_technical_sanction" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "agreement_number" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "year_of_agreement" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "tender_id" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "designation_of_officer_executing_contract" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "date_of_nit" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "date_of_revised_nit" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "date_of_opening_technical_bid" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "no_of_bidders_technical" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "date_of_opening_financial_bid" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "no_of_bidders_financial" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "cost_of_tendered_boq" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "security_deposit" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "additional_performance_security" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "date_of_award" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "contractor_name" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'Pending'::text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "approved_by" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "master_id" integer;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "approval_status" text;
+ALTER TABLE IF EXISTS public."contract_management_tender_award_contract" ADD COLUMN IF NOT EXISTS "draft_id" text;
+
+-- master_submission
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('master_submission_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "user_id" integer NOT NULL;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "cycle" integer NOT NULL;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "status" character varying(20) DEFAULT 'PENDING'::character varying;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "submitted_at" timestamp without time zone DEFAULT now();
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "approved_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "rejection_reason" text;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "rejected_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "created_at" timestamp without time zone DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "module" text;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "estimate_number" text;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "year_of_estimate" text;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "name_of_project" text;
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "estimate_attachment" character varying(255);
+ALTER TABLE IF EXISTS public."master_submission" ADD COLUMN IF NOT EXISTS "sar_attachment" character varying(255);
+
+-- users
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "username" text;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "password_hash" text;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "role" text;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "id" integer DEFAULT nextval('users_id_seq'::regclass) NOT NULL;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "created_by" integer;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "submitted_at" timestamp without time zone;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "is_active" boolean DEFAULT true;
+ALTER TABLE IF EXISTS public."users" ADD COLUMN IF NOT EXISTS "allowed_modules" text;
+
+COMMIT;

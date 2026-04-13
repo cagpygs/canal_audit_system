@@ -3,6 +3,7 @@ import datetime
 import pandas as pd
 import streamlit as st
 from psycopg2 import pool, sql
+import json
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -622,7 +623,7 @@ def get_user_master_submissions_admin(user_id):
 
 def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None, name_of_project=None):
     """
-    Returns submissions by exact match of estimate number and financial year string.
+    Returns submissions by normalized match of estimate number and financial year string.
     Optionally filters by name_of_project.
     """
     conn = None
@@ -639,13 +640,13 @@ def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None, name_
             SELECT m.*, u.username as created_by_user
             FROM master_submission m
             JOIN users u ON m.user_id = u.id
-            WHERE LOWER(m.estimate_number) = LOWER(%s) 
-              AND m.year_of_estimate = %s
+            WHERE TRIM(LOWER(COALESCE(m.estimate_number, ''))) = TRIM(LOWER(%s))
+              AND TRIM(CAST(m.year_of_estimate AS TEXT)) = TRIM(CAST(%s AS TEXT))
         """
         params = [est_no, est_yr]
 
         if name_of_project:
-            query += " AND LOWER(m.name_of_project) = LOWER(%s)"
+            query += " AND TRIM(LOWER(COALESCE(m.name_of_project, ''))) = TRIM(LOWER(%s))"
             params.append(name_of_project)
 
         if user_id:
@@ -671,6 +672,452 @@ def get_submissions_by_estimate(est_no, est_yr, user_id=None, module=None, name_
         )
         return []
 
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
+def _normalize_project_key(project_name):
+    return " ".join(str(project_name or "").split()).lower()
+
+
+def _get_first_non_empty_value(source_dict, *keys):
+    source_dict = source_dict or {}
+    for key in keys:
+        value = source_dict.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _normalize_text_value(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, (list, tuple, set)):
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+        return ", ".join(cleaned) if cleaned else None
+    text_value = str(value).strip()
+    return text_value if text_value else None
+
+
+def ensure_project_dpr_table():
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_dpr (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                module VARCHAR(128) NOT NULL DEFAULT 'contract_management',
+                project_name TEXT NOT NULL,
+                project_key TEXT NOT NULL,
+                dpr_form_data TEXT,
+                category_of_project TEXT,
+                type_of_project TEXT,
+                location_of_head_works TEXT,
+                date_of_investement_clearance_by_goi TEXT,
+                date_of_cwc_clearence TEXT,
+                date_of_approval_of_efc TEXT,
+                districts_covered TEXT,
+                gross_command_area TEXT,
+                cca TEXT,
+                irrigation_potential_in_rabi TEXT,
+                irrigation_potential_in_kharif TEXT,
+                requirement_of_water_for_project TEXT,
+                availability_of_water_against_the_requirement TEXT,
+                pre_project_crop_pattern_in_rabi TEXT,
+                pre_project_crop_pattern_in_kharif TEXT,
+                post_project_crop_pattern_in_rabi TEXT,
+                post_project_crop_pattern_in_kharif TEXT,
+                dpr_file_name TEXT,
+                dpr_file_path TEXT,
+                upload_complete_dpr_file_name TEXT,
+                upload_complete_dpr_file_path TEXT,
+                investment_clearence_file_name TEXT,
+                investment_clearence_file_path TEXT,
+                cwc_clearence_file_name TEXT,
+                cwc_clearence_file_path TEXT,
+                dpr_approval_by_efc_file_name TEXT,
+                dpr_approval_by_efc_file_path TEXT,
+                survey_reports_file_name TEXT,
+                survey_reports_file_path TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                UNIQUE (user_id, module, project_key)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_dpr_user_module
+            ON project_dpr (user_id, module)
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE project_dpr
+            ADD COLUMN IF NOT EXISTS dpr_form_data TEXT
+            """
+        )
+        # Migrate legacy dummy column data into canonical columns before cleanup.
+        legacy_candidates = [
+            "dummmy_field_1",
+            "dummmy_field_2",
+            "dummmy_field_3",
+            "dummmy_field_4",
+            "dummmy_field_5",
+            "dummy_field_1",
+            "dummy_field_2",
+            "dummy_field_3",
+            "dummy_field_4",
+            "dummy_field_5",
+        ]
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'project_dpr'
+              AND column_name = ANY(%s)
+            """,
+            (legacy_candidates,),
+        )
+        existing_legacy_cols = {row[0] for row in cur.fetchall()}
+
+        migration_pairs = [
+            ("category_of_project", ["dummmy_field_1", "dummy_field_1"]),
+            ("type_of_project", ["dummmy_field_2", "dummy_field_2"]),
+            ("location_of_head_works", ["dummmy_field_3", "dummy_field_3"]),
+            ("districts_covered", ["dummmy_field_4", "dummy_field_4"]),
+            ("gross_command_area", ["dummmy_field_5", "dummy_field_5"]),
+        ]
+        set_clauses = []
+        for canonical_col, legacy_cols in migration_pairs:
+            source_cols = [canonical_col] + [col for col in legacy_cols if col in existing_legacy_cols]
+            if len(source_cols) <= 1:
+                continue
+            coalesce_parts = ", ".join([f"NULLIF(TRIM({col}), '')" for col in source_cols])
+            set_clauses.append(f"{canonical_col} = COALESCE({coalesce_parts})")
+        if set_clauses:
+            cur.execute(f"UPDATE project_dpr SET {', '.join(set_clauses)}")
+        # Remove legacy dummy columns from older schema versions.
+        for legacy_col in [
+            "dummmy_field_1",
+            "dummmy_field_2",
+            "dummmy_field_3",
+            "dummmy_field_4",
+            "dummmy_field_5",
+            "dummy_field_1",
+            "dummy_field_2",
+            "dummy_field_3",
+            "dummy_field_4",
+            "dummy_field_5",
+        ]:
+            cur.execute(f"ALTER TABLE project_dpr DROP COLUMN IF EXISTS {legacy_col}")
+        dpr_columns = [
+            "category_of_project TEXT",
+            "type_of_project TEXT",
+            "location_of_head_works TEXT",
+            "date_of_investement_clearance_by_goi TEXT",
+            "date_of_cwc_clearence TEXT",
+            "date_of_approval_of_efc TEXT",
+            "districts_covered TEXT",
+            "gross_command_area TEXT",
+            "cca TEXT",
+            "irrigation_potential_in_rabi TEXT",
+            "irrigation_potential_in_kharif TEXT",
+            "requirement_of_water_for_project TEXT",
+            "availability_of_water_against_the_requirement TEXT",
+            "pre_project_crop_pattern_in_rabi TEXT",
+            "pre_project_crop_pattern_in_kharif TEXT",
+            "post_project_crop_pattern_in_rabi TEXT",
+            "post_project_crop_pattern_in_kharif TEXT",
+            "upload_complete_dpr_file_name TEXT",
+            "upload_complete_dpr_file_path TEXT",
+            "investment_clearence_file_name TEXT",
+            "investment_clearence_file_path TEXT",
+            "cwc_clearence_file_name TEXT",
+            "cwc_clearence_file_path TEXT",
+            "dpr_approval_by_efc_file_name TEXT",
+            "dpr_approval_by_efc_file_path TEXT",
+            "survey_reports_file_name TEXT",
+            "survey_reports_file_path TEXT",
+        ]
+        for i in range(1, 7):
+            dpr_columns.extend(
+                [
+                    f"date_of_approval_revised_dpr_revision_{i} TEXT",
+                    f"amount_of_revised_dpr_revision_{i} TEXT",
+                    f"target_date_to_complete_project_revision_{i} TEXT",
+                ]
+            )
+        for col_def in dpr_columns:
+            cur.execute(f"ALTER TABLE project_dpr ADD COLUMN IF NOT EXISTS {col_def}")
+        conn.commit()
+        return True
+    except Exception as e:
+        report_error("Error ensuring project_dpr table.", e, "crud.ensure_project_dpr_table")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
+def get_project_dpr(user_id, project_name, module="contract_management"):
+    user_id = int(user_id)
+    project_key = _normalize_project_key(project_name)
+    if not project_key:
+        return None
+
+    if not ensure_project_dpr_table():
+        return None
+
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT *
+            FROM project_dpr
+            WHERE user_id = %s
+              AND module = %s
+              AND project_key = %s
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (user_id, module, project_key),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cur.description]
+        return dict(zip(columns, row))
+    except Exception as e:
+        report_error("Error fetching project DPR.", e, "crud.get_project_dpr")
+        return None
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            release_connection(conn)
+
+
+def upsert_project_dpr(
+    user_id,
+    project_name,
+    fields,
+    dpr_file_name,
+    dpr_file_path=None,
+    module="contract_management",
+):
+    user_id = int(user_id)
+    project_name = (project_name or "").strip()
+    project_key = _normalize_project_key(project_name)
+    if not project_key:
+        return False
+
+    fields = fields or {}
+    serialized_fields = json.dumps(fields, ensure_ascii=False)
+
+    category_of_project = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Category of Project", "category_of_project")
+    )
+    type_of_project = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Type of Project", "type_of_project")
+    )
+    location_of_head_works = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Location of Head Works", "location_of_head_works")
+    )
+    date_of_investement_clearance_by_goi = _normalize_text_value(
+        _get_first_non_empty_value(
+            fields,
+            "Date of Investement clearance by GOI",
+            "date_of_investement_clearance_by_goi",
+        )
+    )
+    date_of_cwc_clearence = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Date of CWC clearence", "date_of_cwc_clearence")
+    )
+    date_of_approval_of_efc = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Date of approval of EFC", "date_of_approval_of_efc")
+    )
+    districts_covered = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Districts covered", "districts_covered")
+    )
+    gross_command_area = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Gross Command area", "gross_command_area")
+    )
+    cca = _normalize_text_value(_get_first_non_empty_value(fields, "CCA", "cca"))
+    irrigation_potential_in_rabi = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Irrigation Potential in RABI", "irrigation_potential_in_rabi")
+    )
+    irrigation_potential_in_kharif = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Irrigation Potential in KHARIF", "irrigation_potential_in_kharif")
+    )
+    requirement_of_water_for_project = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Requirement of Water for project", "requirement_of_water_for_project")
+    )
+    availability_of_water_against_the_requirement = _normalize_text_value(
+        _get_first_non_empty_value(
+            fields,
+            "Availability of Water against the requirement",
+            "availability_of_water_against_the_requirement",
+        )
+    )
+    pre_project_crop_pattern_in_rabi = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Pre-Project Crop Pattern in RABI", "pre_project_crop_pattern_in_rabi")
+    )
+    pre_project_crop_pattern_in_kharif = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Pre-Project Crop Pattern in KHARIF", "pre_project_crop_pattern_in_kharif")
+    )
+    post_project_crop_pattern_in_rabi = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Post-Project Crop Pattern in RABI", "post_project_crop_pattern_in_rabi")
+    )
+    post_project_crop_pattern_in_kharif = _normalize_text_value(
+        _get_first_non_empty_value(fields, "Post-Project Crop Pattern in KHARIF", "post_project_crop_pattern_in_kharif")
+    )
+
+    upload_complete_dpr_file_name = _normalize_text_value(
+        _get_first_non_empty_value(fields, "upload_complete_dpr_file_name", "dpr_file_name")
+    )
+    upload_complete_dpr_file_path = _normalize_text_value(
+        _get_first_non_empty_value(fields, "upload_complete_dpr_file_path", "dpr_file_path")
+    )
+    investment_clearence_file_name = _normalize_text_value(
+        _get_first_non_empty_value(fields, "investment_clearence_file_name")
+    )
+    investment_clearence_file_path = _normalize_text_value(
+        _get_first_non_empty_value(fields, "investment_clearence_file_path")
+    )
+    cwc_clearence_file_name = _normalize_text_value(
+        _get_first_non_empty_value(fields, "cwc_clearence_file_name")
+    )
+    cwc_clearence_file_path = _normalize_text_value(
+        _get_first_non_empty_value(fields, "cwc_clearence_file_path")
+    )
+    dpr_approval_by_efc_file_name = _normalize_text_value(
+        _get_first_non_empty_value(fields, "dpr_approval_by_efc_file_name")
+    )
+    dpr_approval_by_efc_file_path = _normalize_text_value(
+        _get_first_non_empty_value(fields, "dpr_approval_by_efc_file_path")
+    )
+    survey_reports_file_name = _normalize_text_value(
+        _get_first_non_empty_value(fields, "survey_reports_file_name")
+    )
+    survey_reports_file_path = _normalize_text_value(
+        _get_first_non_empty_value(fields, "survey_reports_file_path")
+    )
+
+    revision_values = {}
+    for i in range(1, 7):
+        suffix = {1: "1st", 2: "2nd", 3: "3rd"}.get(i, f"{i}th")
+        date_label = f"Date of approval revised DPR ({suffix} revision)"
+        amount_label = f"Amount of revised DPR ({suffix} revision)"
+        target_label = f"Target date to complete the project ({suffix} revision)"
+
+        revision_values[f"date_of_approval_revised_dpr_revision_{i}"] = _normalize_text_value(
+            _get_first_non_empty_value(fields, date_label, f"date_of_approval_revised_dpr_revision_{i}")
+        )
+        revision_values[f"amount_of_revised_dpr_revision_{i}"] = _normalize_text_value(
+            _get_first_non_empty_value(fields, amount_label, f"amount_of_revised_dpr_revision_{i}")
+        )
+        revision_values[f"target_date_to_complete_project_revision_{i}"] = _normalize_text_value(
+            _get_first_non_empty_value(fields, target_label, f"target_date_to_complete_project_revision_{i}")
+        )
+
+    # Keep legacy DPR file columns synchronized with Upload Complete DPR.
+    final_dpr_file_name = _normalize_text_value(dpr_file_name) or upload_complete_dpr_file_name
+    final_dpr_file_path = _normalize_text_value(dpr_file_path) or upload_complete_dpr_file_path
+
+    if not ensure_project_dpr_table():
+        return False
+
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        dpr_record = {
+            "project_name": project_name,
+            "dpr_form_data": serialized_fields,
+            "category_of_project": category_of_project,
+            "type_of_project": type_of_project,
+            "location_of_head_works": location_of_head_works,
+            "date_of_investement_clearance_by_goi": date_of_investement_clearance_by_goi,
+            "date_of_cwc_clearence": date_of_cwc_clearence,
+            "date_of_approval_of_efc": date_of_approval_of_efc,
+            "districts_covered": districts_covered,
+            "gross_command_area": gross_command_area,
+            "cca": cca,
+            "irrigation_potential_in_rabi": irrigation_potential_in_rabi,
+            "irrigation_potential_in_kharif": irrigation_potential_in_kharif,
+            "requirement_of_water_for_project": requirement_of_water_for_project,
+            "availability_of_water_against_the_requirement": availability_of_water_against_the_requirement,
+            "pre_project_crop_pattern_in_rabi": pre_project_crop_pattern_in_rabi,
+            "pre_project_crop_pattern_in_kharif": pre_project_crop_pattern_in_kharif,
+            "post_project_crop_pattern_in_rabi": post_project_crop_pattern_in_rabi,
+            "post_project_crop_pattern_in_kharif": post_project_crop_pattern_in_kharif,
+            "dpr_file_name": final_dpr_file_name,
+            "dpr_file_path": final_dpr_file_path,
+            "upload_complete_dpr_file_name": upload_complete_dpr_file_name,
+            "upload_complete_dpr_file_path": upload_complete_dpr_file_path,
+            "investment_clearence_file_name": investment_clearence_file_name,
+            "investment_clearence_file_path": investment_clearence_file_path,
+            "cwc_clearence_file_name": cwc_clearence_file_name,
+            "cwc_clearence_file_path": cwc_clearence_file_path,
+            "dpr_approval_by_efc_file_name": dpr_approval_by_efc_file_name,
+            "dpr_approval_by_efc_file_path": dpr_approval_by_efc_file_path,
+            "survey_reports_file_name": survey_reports_file_name,
+            "survey_reports_file_path": survey_reports_file_path,
+        }
+        dpr_record.update(revision_values)
+
+        update_assignments = ",\n                ".join(
+            [f"{col_name} = %s" for col_name in dpr_record.keys()] + ["updated_at = NOW()"]
+        )
+        update_sql = f"""
+            UPDATE project_dpr
+            SET
+                {update_assignments}
+            WHERE user_id = %s
+              AND module = %s
+              AND project_key = %s
+        """
+        update_params = list(dpr_record.values()) + [user_id, module, project_key]
+        cur.execute(update_sql, update_params)
+
+        if cur.rowcount == 0:
+            insert_columns = ["user_id", "module", "project_key"] + list(dpr_record.keys())
+            insert_columns_sql = ",\n                    ".join(insert_columns + ["created_at", "updated_at"])
+            insert_values_sql = ", ".join(["%s"] * len(insert_columns) + ["NOW()", "NOW()"])
+            insert_sql = f"""
+                INSERT INTO project_dpr (
+                    {insert_columns_sql}
+                )
+                VALUES (
+                    {insert_values_sql}
+                )
+            """
+            insert_params = [user_id, module, project_key] + list(dpr_record.values())
+            cur.execute(insert_sql, insert_params)
+        conn.commit()
+        return True
+    except Exception as e:
+        report_error("Error saving project DPR.", e, "crud.upsert_project_dpr")
+        if conn:
+            conn.rollback()
+        return False
     finally:
         if cur:
             cur.close()
