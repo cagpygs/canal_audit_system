@@ -97,6 +97,17 @@ if not cookies.ready():
 
 money_keywords = ["expenditure", "amount", "cost", "payment", "value", "budget"]
 
+CUSTOM_TABLE_ORDER = {
+    "contract_management": [
+        "contract_management_admin_financial_sanction",
+        "contract_management_technical_sanction",
+        "contract_management_tender_award_contract",
+        "contract_management_contract_master",
+        "contract_management_payments_recoveries",
+        "contract_management_budget_summary",
+    ]
+}
+
 # =====================================================
 # ====  URL QUERY PARAM HANDLER (global, top) =========
 # =====================================================
@@ -3432,17 +3443,6 @@ if not is_admin:
     # =========================================================
     # ================== MODULE FORM VIEW =====================
     # =========================================================
-
-    CUSTOM_TABLE_ORDER = {
-        "contract_management": [
-            "contract_management_admin_financial_sanction",
-            "contract_management_technical_sanction",
-            "contract_management_tender_award_contract",
-            "contract_management_contract_master",
-            "contract_management_payments_recoveries",
-            "contract_management_budget_summary",
-        ]
-    }
 
     module_name = current_view_key
     if module_name in CUSTOM_TABLE_ORDER:
